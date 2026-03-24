@@ -3,6 +3,13 @@ name = "fakekey"
 version = "0.1.0"
 edition = "2024"
 description = "API Key Proxy Agent - manage and replace API keys via network proxy"
+license = "Apache-2.0"
+homepage = "https://github.com/happyvibing/fakekey"
+repository = "https://github.com/happyvibing/fakekey"
+documentation = "https://github.com/happyvibing/fakekey#readme"
+authors = ["happyvibing"]
+keywords = ["proxy", "api-key", "security", "cli"]
+categories = ["command-line-utilities", "network-programming"]
 
 [lib]
 name = "fakekey"
