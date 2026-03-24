@@ -230,7 +230,6 @@ async fn forward_request(
     let method = req.method().clone();
     let mut headers = req.headers().clone();
 
-    // Replace keys in the URI
     let (final_uri, uri_replaced) = key_handler::replace_in_url(upstream_uri, key_map);
     if uri_replaced {
         info!("Replaced key in URL");
@@ -354,8 +353,7 @@ where
     // Build path+query for the request
     let path_and_query = uri
         .path_and_query()
-        .map(|pq| pq.to_string())
-        .unwrap_or_else(|| "/".to_string());
+        .map_or_else(|| "/".to_string(), |pq| pq.to_string());
 
     let mut req_builder = Request::builder()
         .method(method.clone())
@@ -364,9 +362,9 @@ where
     // Copy headers
     for (name, value) in headers.iter() {
         // Skip hop-by-hop headers
-        let name_str = name.as_str().to_lowercase();
+        let name_str = name.as_str();
         if matches!(
-            name_str.as_str(),
+            name_str,
             "transfer-encoding" | "connection" | "keep-alive" | "te" | "trailer" | "upgrade"
         ) {
             continue;

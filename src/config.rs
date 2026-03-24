@@ -7,6 +7,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Default)]
 pub struct AppConfig {
     pub proxy: ProxyConfig,
     pub api_keys: Vec<ApiKeyConfig>,
@@ -51,6 +52,7 @@ pub enum ScanLocation {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Default)]
 pub struct SecurityConfig {
     #[serde(default)]
     pub encrypt_config: bool,
@@ -65,8 +67,11 @@ fn default_log_level() -> String {
 }
 
 fn default_data_dir() -> String {
-    let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
-    home.join(".fakekey").to_string_lossy().to_string()
+    dirs::home_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join(".fakekey")
+        .to_string_lossy()
+        .into_owned()
 }
 
 fn default_header_name() -> String {
@@ -84,23 +89,7 @@ impl Default for ProxyConfig {
     }
 }
 
-impl Default for SecurityConfig {
-    fn default() -> Self {
-        Self {
-            encrypt_config: false,
-        }
-    }
-}
 
-impl Default for AppConfig {
-    fn default() -> Self {
-        Self {
-            proxy: ProxyConfig::default(),
-            api_keys: Vec::new(),
-            security: SecurityConfig::default(),
-        }
-    }
-}
 
 impl AppConfig {
     /// Return the resolved data directory path (expanding ~)
@@ -135,17 +124,18 @@ impl AppConfig {
 
     /// Return the default config file path: ~/.fakekey/config.yaml
     pub fn config_path() -> PathBuf {
-        let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
-        home.join(".fakekey").join("config.yaml")
+        dirs::home_dir()
+            .unwrap_or_else(|| PathBuf::from("."))
+            .join(".fakekey")
+            .join("config.yaml")
     }
 
     /// Build a mapping from fake_key -> real_key for quick lookup
     pub fn build_key_map(&self) -> HashMap<String, String> {
-        let mut map = HashMap::new();
-        for key_config in &self.api_keys {
-            map.insert(key_config.fake_key.clone(), key_config.real_key.clone());
-        }
-        map
+        self.api_keys
+            .iter()
+            .map(|key_config| (key_config.fake_key.clone(), key_config.real_key.clone()))
+            .collect()
     }
 
     /// Find an API key config by service name
@@ -177,12 +167,12 @@ pub fn generate_fake_key(real_key: &str) -> String {
 
 /// Ensure uniqueness of the fake key among existing keys.
 /// If there is a collision, append random chars before the suffix.
-pub fn generate_unique_fake_key(real_key: &str, existing_fake_keys: &[String]) -> String {
+pub fn generate_unique_fake_key(real_key: &str, existing_fake_keys: &[&str]) -> String {
     let mut fake = generate_fake_key(real_key);
     let mut attempts = 0;
-    while existing_fake_keys.contains(&fake) && attempts < 100 {
-        let mut rng = rand::thread_rng();
-        let rand_char: char = rng.gen_range(b'a'..=b'z') as char;
+    while existing_fake_keys.iter().any(|k| k == &fake) && attempts < 100 {
+        let mut rng = rand::rng();
+        let rand_char: char = rng.random_range(b'a'..=b'z') as char;
         let suffix = format!("{}_fk", rand_char);
         let base = &real_key[..real_key.len().saturating_sub(suffix.len())];
         fake = format!("{}{}", base, suffix);
@@ -193,11 +183,10 @@ pub fn generate_unique_fake_key(real_key: &str, existing_fake_keys: &[String]) -
 
 /// Expand ~ to the user's home directory
 pub fn expand_tilde(path: &str) -> PathBuf {
-    if path.starts_with('~') {
-        if let Some(home) = dirs::home_dir() {
-            return home.join(&path[2..]);
+    if let Some(rest) = path.strip_prefix('~')
+        && let Some(home) = dirs::home_dir() {
+            return home.join(rest);
         }
-    }
     PathBuf::from(path)
 }
 
@@ -206,10 +195,11 @@ pub fn init_data_dir(data_dir: &Path) -> Result<()> {
     let dirs_to_create = [
         data_dir.to_path_buf(),
         data_dir.join("certs"),
-        data_dir.join("certs").join("ca"),
-        data_dir.join("certs").join("cache"),
+        data_dir.join("certs/ca"),
+        data_dir.join("certs/cache"),
         data_dir.join("logs"),
     ];
+    
     for dir in &dirs_to_create {
         fs::create_dir_all(dir)
             .with_context(|| format!("Failed to create directory: {}", dir.display()))?;
@@ -247,11 +237,21 @@ mod tests {
 
     #[test]
     fn test_unique_fake_key() {
-        let real = "sk-proj-1234567890abcdefghijk";
-        let existing = vec![generate_fake_key(real)];
-        let fake = generate_unique_fake_key(real, &existing);
-        assert!(fake.ends_with("_fk"));
-        assert!(!existing.contains(&fake));
+        let config = AppConfig {
+            api_keys: vec![ApiKeyConfig {
+                service: "openai".to_string(),
+                real_key: "sk-real".to_string(),
+                fake_key: "sk-fake_fk".to_string(),
+                header_name: "Authorization".to_string(),
+                scan_locations: vec![],
+                created_at: Utc::now(),
+            }],
+            ..Default::default()
+        };
+        let existing_fake_keys: Vec<_> = config.api_keys.iter().map(|k| k.fake_key.as_str()).collect();
+        let fake_key = generate_unique_fake_key("sk-proj-1234567890abcdefghijk", &existing_fake_keys);
+        assert!(fake_key.ends_with("_fk"));
+        assert!(!existing_fake_keys.iter().any(|k| k == &fake_key));
     }
 
     #[test]

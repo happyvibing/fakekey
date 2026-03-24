@@ -1,31 +1,31 @@
 [package]
 name = "fakekey"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 description = "API Key Proxy Agent - manage and replace API keys via network proxy"
 
 [dependencies]
-tokio = { version = "1", features = ["full"] }
-hyper = { version = "1", features = ["full"] }
+tokio = { version = "1.42", features = ["full"] }
+hyper = { version = "1.5", features = ["full"] }
 hyper-util = { version = "0.1", features = ["full"] }
 http-body-util = "0.1"
-bytes = "1"
+bytes = "1.9"
 rustls = { version = "0.23", features = ["ring"] }
 tokio-rustls = "0.26"
 rustls-pemfile = "2"
 rcgen = { version = "0.13", features = ["x509-parser"] }
 webpki-roots = "0.26"
-serde = { version = "1", features = ["derive"] }
+serde = { version = "1.0", features = ["derive"] }
 serde_yaml = "0.9"
-serde_json = "1"
-clap = { version = "4", features = ["derive"] }
-regex = "1"
+serde_json = "1.0"
+clap = { version = "4.5", features = ["derive"] }
+regex = "1.11"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 chrono = { version = "0.4", features = ["serde"] }
-rand = "0.8"
-anyhow = "1"
-dirs = "5"
-uuid = { version = "1", features = ["v4"] }
+rand = "0.9"
+anyhow = "1.0"
+dirs = "6.0"
+uuid = { version = "1.11", features = ["v4"] }
 aes-gcm = "0.10"
 sha2 = "0.10"

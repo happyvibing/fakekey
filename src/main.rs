@@ -147,7 +147,7 @@ fn cmd_add(service: &str, key: &str, header: &str) -> Result<()> {
         );
     }
 
-    let existing_fake_keys: Vec<String> = config.api_keys.iter().map(|k| k.fake_key.clone()).collect();
+    let existing_fake_keys: Vec<_> = config.api_keys.iter().map(|k| k.fake_key.as_str()).collect();
     let fake_key = generate_unique_fake_key(key, &existing_fake_keys);
 
     let key_config = ApiKeyConfig {
@@ -242,7 +242,7 @@ fn cmd_status() -> Result<()> {
 
     if pid_file.exists() {
         let pid_str = std::fs::read_to_string(&pid_file)?;
-        let pid: u32 = pid_str.trim().parse().unwrap_or(0);
+        let pid: u32 = pid_str.trim().parse().unwrap_or_default();
 
         // Check if process is running
         if is_process_running(pid) {
@@ -330,7 +330,7 @@ fn cmd_stop() -> Result<()> {
     }
 
     let pid_str = std::fs::read_to_string(&pid_file)?;
-    let pid: u32 = pid_str.trim().parse().unwrap_or(0);
+    let pid: u32 = pid_str.trim().parse().unwrap_or_default();
 
     if pid == 0 {
         std::fs::remove_file(&pid_file)?;

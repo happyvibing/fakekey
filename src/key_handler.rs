@@ -7,8 +7,8 @@ pub fn replace_keys(text: &str, key_map: &HashMap<String, String>) -> (String, u
     let mut count = 0;
 
     for (fake_key, real_key) in key_map {
-        if result.contains(fake_key.as_str()) {
-            result = result.replace(fake_key.as_str(), real_key.as_str());
+        if result.contains(fake_key) {
+            result = result.replace(fake_key, real_key);
             count += 1;
         }
     }
@@ -50,7 +50,7 @@ pub fn mask_key(key: &str) -> String {
     }
     let prefix = &key[..4];
     let suffix = &key[key.len() - 4..];
-    format!("{}{}{}",prefix, "*".repeat(key.len() - 8), suffix)
+    format!("{}{}{}", prefix, "*".repeat(key.len() - 8), suffix)
 }
 
 #[cfg(test)]

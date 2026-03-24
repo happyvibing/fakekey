@@ -34,19 +34,19 @@ impl CertManager {
         let key_path = ca_dir.join("key.pem");
 
         let (ca_cert_pem, ca_key_pem) = if cert_path.exists() && key_path.exists() {
-            let cert_pem = fs::read_to_string(&cert_path)
+            let ca_cert_contents = fs::read_to_string(&cert_path)
                 .with_context(|| "Failed to read CA cert")?;
-            let key_pem = fs::read_to_string(&key_path)
+            let ca_key_contents = fs::read_to_string(&key_path)
                 .with_context(|| "Failed to read CA key")?;
-            (cert_pem, key_pem)
+            (ca_cert_contents, ca_key_contents)
         } else {
-            let (cert_pem, key_pem) = generate_ca_cert()?;
-            fs::write(&cert_path, &cert_pem)?;
-            fs::write(&key_path, &key_pem)?;
+            let (ca_cert_pem, ca_key_pem) = generate_ca_cert()?;
+            fs::write(&cert_path, &ca_cert_pem)?;
+            fs::write(&key_path, &ca_key_pem)?;
 
             // Also write a copy for easy export
-            let export_path = data_dir.join("certs").join("ca.crt");
-            fs::write(&export_path, &cert_pem)?;
+            let export_path = data_dir.join("certs/ca.crt");
+            fs::write(&export_path, &ca_cert_pem)?;
 
             #[cfg(unix)]
             {
@@ -55,7 +55,7 @@ impl CertManager {
             }
 
             tracing::info!("Generated new CA certificate at {}", cert_path.display());
-            (cert_pem, key_pem)
+            (ca_cert_pem, ca_key_pem)
         };
 
         // Verify the key pair can be parsed

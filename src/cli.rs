@@ -1,7 +1,9 @@
 use clap::{Parser, Subcommand};
 
 #[derive(Parser)]
-#[command(name = "fakekey", about = "API Key Proxy Agent", version)]
+#[command(name = "fakekey")]
+#[command(about = "API Key Proxy Agent")]
+#[command(version)]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Commands,
@@ -34,7 +36,7 @@ pub enum Commands {
         key: String,
 
         /// Header name for the key
-        #[arg(long, default_value = "Authorization")]
+        #[arg(long, default_value_t = String::from("Authorization"))]
         header: String,
     },
 
