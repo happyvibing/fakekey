@@ -19,13 +19,15 @@ use std::sync::Arc;
 async fn main() -> Result<()> {
     let cli = Cli::parse();
 
-    // Initialize tracing
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
-        )
-        .init();
+    // Initialize tracing for non-start commands
+    if !matches!(cli.command, Commands::Start { .. }) {
+        tracing_subscriber::fmt()
+            .with_env_filter(
+                tracing_subscriber::EnvFilter::try_from_default_env()
+                    .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
+            )
+            .init();
+    }
 
     match cli.command {
         Commands::Init => cmd_init()?,
@@ -108,8 +110,42 @@ async fn cmd_start(port: u16, daemon_mode: bool) -> Result<()> {
         );
     }
 
+    // Setup file logging
+    let file_appender = tracing_appender::rolling::never(
+        data_dir.join("logs"),
+        "proxy.log",
+    );
+    let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
+    
+    tracing_subscriber::fmt()
+        .with_writer(non_blocking)
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| {
+                    tracing_subscriber::EnvFilter::new(&config.proxy.log_level)
+                }),
+        )
+        .init();
+
+    // Initialize audit logger first
+    let audit_logger = match audit::AuditLogger::new(&data_dir) {
+        Ok(logger) => {
+            let logger = Arc::new(logger);
+            let _ = logger.log(
+                audit::AuditEventType::ProxyStart,
+                format!("Proxy started on port {}", port),
+                true,
+            );
+            Some(logger)
+        }
+        Err(e) => {
+            println!("Warning: Failed to initialize audit logger: {}", e);
+            None
+        }
+    };
+
     let cert_manager = Arc::new(
-        cert::CertManager::new(&data_dir)
+        cert::CertManager::new_with_logger(&data_dir, audit_logger.clone())
             .with_context(|| "Failed to load certificates")?,
     );
 
@@ -128,6 +164,7 @@ async fn cmd_start(port: u16, daemon_mode: bool) -> Result<()> {
         key_map,
         cert_manager,
         allowed_hosts: config.proxy.allowed_hosts.clone(),
+        audit_logger,
     });
 
     let addr: SocketAddr = format!("127.0.0.1:{}", port).parse()?;

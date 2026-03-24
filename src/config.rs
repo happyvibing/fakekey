@@ -115,6 +115,19 @@ impl AppConfig {
         
         let config: AppConfig = serde_yaml::from_str(&content)
             .with_context(|| "Failed to parse config file")?;
+        
+        // Log config load if audit logger is available
+        if let Ok(data_dir_env) = std::env::var("FAKEKEY_DATA_DIR") {
+            let data_dir_path = std::path::PathBuf::from(data_dir_env);
+            if let Ok(logger) = crate::audit::AuditLogger::new(&data_dir_path) {
+                let _ = logger.log(
+                    crate::audit::AuditEventType::ConfigLoad,
+                    "Configuration loaded successfully".to_string(),
+                    true,
+                );
+            }
+        }
+        
         Ok(config)
     }
 
@@ -134,6 +147,19 @@ impl AppConfig {
             fs::write(&path, content)
                 .with_context(|| format!("Failed to write config file: {}", path.display()))?;
         }
+        
+        // Log config save if audit logger is available
+        if let Ok(data_dir_env) = std::env::var("FAKEKEY_DATA_DIR") {
+            let data_dir_path = std::path::PathBuf::from(data_dir_env);
+            if let Ok(logger) = crate::audit::AuditLogger::new(&data_dir_path) {
+                let _ = logger.log(
+                    crate::audit::AuditEventType::ConfigSave,
+                    format!("Configuration saved (encrypted: {})", self.security.encrypt_config),
+                    true,
+                );
+            }
+        }
+        
         Ok(())
     }
 

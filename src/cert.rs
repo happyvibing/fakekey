@@ -10,6 +10,8 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
+use crate::audit::{AuditEventType, AuditLogger};
+
 /// Manages CA certificate and dynamically generated server certificates.
 ///
 /// We store the CA cert PEM and key PEM so we can reconstruct rcgen objects
@@ -20,11 +22,17 @@ pub struct CertManager {
     cache_dir: PathBuf,
     /// In-memory cache: domain -> (cert_pem, key_pem)
     mem_cache: Arc<RwLock<HashMap<String, (String, String)>>>,
+    audit_logger: Option<Arc<AuditLogger>>,
 }
 
 impl CertManager {
     /// Load or generate CA certificate from the given data directory
     pub fn new(data_dir: &Path) -> Result<Self> {
+        Self::new_with_logger(data_dir, None)
+    }
+
+    /// Load or generate CA certificate with optional audit logger
+    pub fn new_with_logger(data_dir: &Path, audit_logger: Option<Arc<AuditLogger>>) -> Result<Self> {
         let ca_dir = data_dir.join("certs").join("ca");
         let cache_dir = data_dir.join("certs").join("cache");
         fs::create_dir_all(&ca_dir)?;
@@ -55,6 +63,13 @@ impl CertManager {
             }
 
             tracing::info!("Generated new CA certificate at {}", cert_path.display());
+            if let Some(logger) = &audit_logger {
+                let _ = logger.log(
+                    AuditEventType::CertGenerated,
+                    format!("Generated CA certificate at {}", cert_path.display()),
+                    true,
+                );
+            }
             (ca_cert_pem, ca_key_pem)
         };
 
@@ -67,10 +82,12 @@ impl CertManager {
             ca_key_pem,
             cache_dir,
             mem_cache: Arc::new(RwLock::new(HashMap::new())),
+            audit_logger,
         })
     }
 
     /// Get the CA certificate PEM for export
+    #[allow(dead_code)]
     pub fn ca_cert_pem(&self) -> &str {
         &self.ca_cert_pem
     }
@@ -110,6 +127,13 @@ impl CertManager {
         }
 
         tracing::debug!("Generated server certificate for {}", domain);
+        if let Some(logger) = &self.audit_logger {
+            let _ = logger.log(
+                AuditEventType::CertGenerated,
+                format!("Generated server certificate for domain: {}", domain),
+                true,
+            );
+        }
         Ok((cert_pem, key_pem))
     }
 

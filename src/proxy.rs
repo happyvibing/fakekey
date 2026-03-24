@@ -13,6 +13,7 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio_rustls::TlsAcceptor;
 use tracing::{debug, error, info, warn};
 
+use crate::audit::{AuditEventType, AuditLogger};
 use crate::cert::CertManager;
 use crate::key_handler;
 
@@ -21,6 +22,7 @@ pub struct ProxyState {
     pub key_map: HashMap<String, String>,
     pub cert_manager: Arc<CertManager>,
     pub allowed_hosts: Vec<String>,
+    pub audit_logger: Option<Arc<AuditLogger>>,
 }
 
 /// Start the proxy server on the given address
@@ -105,6 +107,13 @@ async fn handle_connect(
             .any(|h| domain.contains(h) || h.contains(&domain))
     {
         warn!("Blocked CONNECT to non-allowed host: {}", domain);
+        if let Some(logger) = &state.audit_logger {
+            let _ = logger.log(
+                AuditEventType::AuthFailure,
+                format!("Blocked connection to non-allowed host: {}", domain),
+                false,
+            );
+        }
         let resp = Response::builder()
             .status(StatusCode::FORBIDDEN)
             .body(Full::new(Bytes::from("Host not allowed")))
@@ -187,7 +196,7 @@ async fn handle_https_request(
 
     debug!("HTTPS request: {} {}", req.method(), upstream_uri);
 
-    match forward_request(req, &upstream_uri, &state.key_map).await {
+    match forward_request(req, &upstream_uri, &state.key_map, &state.audit_logger).await {
         Ok(resp) => Ok(resp),
         Err(e) => {
             error!("Forward error for {}: {}", upstream_uri, e);
@@ -208,7 +217,7 @@ async fn handle_http(
     let uri = req.uri().to_string();
     debug!("HTTP request: {} {}", req.method(), uri);
 
-    match forward_request(req, &uri, &state.key_map).await {
+    match forward_request(req, &uri, &state.key_map, &state.audit_logger).await {
         Ok(resp) => Ok(resp),
         Err(e) => {
             error!("Forward error for {}: {}", uri, e);
@@ -226,6 +235,7 @@ async fn forward_request(
     req: Request<Incoming>,
     upstream_uri: &str,
     key_map: &HashMap<String, String>,
+    audit_logger: &Option<Arc<AuditLogger>>,
 ) -> Result<Response<Full<Bytes>>> {
     let method = req.method().clone();
     let mut headers = req.headers().clone();
@@ -233,17 +243,23 @@ async fn forward_request(
     let (final_uri, uri_replaced) = key_handler::replace_in_url(upstream_uri, key_map);
     if uri_replaced {
         info!("Replaced key in URL");
+        if let Some(logger) = audit_logger {
+            let _ = logger.log_key_replacement("URL");
+        }
     }
 
     // Replace keys in headers
-    let mut _header_replacements = 0;
+    let mut header_replacements = 0;
     let mut new_headers = hyper::HeaderMap::new();
     for (name, value) in headers.iter() {
         let value_str = value.to_str().unwrap_or_default();
         let (new_value, replaced) = key_handler::replace_in_header_value(value_str, key_map);
         if replaced {
-            _header_replacements += 1;
+            header_replacements += 1;
             info!("Replaced key in header: {}", name);
+            if let Some(logger) = audit_logger {
+                let _ = logger.log_key_replacement(&format!("Header: {}", name));
+            }
         }
         if let Ok(v) = hyper::header::HeaderValue::from_str(&new_value) {
             new_headers.insert(name.clone(), v);
@@ -268,6 +284,15 @@ async fn forward_request(
     let (final_body, body_replaced) = key_handler::replace_in_body(&body_bytes, key_map);
     if body_replaced {
         info!("Replaced key in request body");
+        if let Some(logger) = audit_logger {
+            let _ = logger.log_key_replacement("Body");
+        }
+    }
+
+    // Log request processing
+    let key_replaced = uri_replaced || header_replacements > 0 || body_replaced;
+    if let Some(logger) = audit_logger {
+        let _ = logger.log_request(method.as_str(), upstream_uri, key_replaced);
     }
 
     // Build and send upstream request using hyper client

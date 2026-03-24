@@ -241,12 +241,43 @@ security:
 
 ### MVP（最小可行产品）
 - [x] 项目架构设计
-- [ ] HTTP 代理基础功能
-- [ ] HTTPS MITM 和证书生成
-- [ ] 假密钥生成（后缀策略）
-- [ ] Header 中密钥替换
-- [ ] CLI 命令（init, start, add, list, stop）
-- [ ] 配置文件管理
+- [x] HTTP 代理基础功能
+- [x] HTTPS MITM 和证书生成
+- [x] 假密钥生成（后缀策略）
+- [x] Header 中密钥替换
+- [x] URL 参数中密钥替换
+- [x] Body 中密钥替换
+- [x] CLI 命令（init, start, add, list, stop）
+- [x] 配置文件管理
+- [x] 证书缓存管理
+- [x] 审计日志系统
+- [x] 配置文件加密
+- [x] 日志文件输出
+- [x] 服务模板系统
+- [x] 后台运行模式
+
+### 已完成的高级功能
+- [x] 动态证书生成和缓存
+- [x] 多位置密钥扫描（Header、URL、Body）
+- [x] 安全的密钥存储和加密
+- [x] 审计日志记录
+- [x] 日志脱敏处理
+- [x] CA 证书管理
+- [x] 进程管理（PID 文件）
+- [x] 允许主机白名单
+- [x] 服务模板（OpenAI, GitHub, Google, Anthropic, HuggingFace, DeepSeek）
+
+### 待完成功能（可选增强）
+- [ ] 实时日志查看（follow模式）
+- [ ] WebSocket 代理支持
+- [ ] HTTP/2 支持
+- [ ] 性能监控和统计
+- [ ] 配置导入/导出（团队共享）
+- [ ] GUI 管理界面
+- [ ] 更多服务模板
+- [ ] 密钥轮换策略
+- [ ] 多用户支持
+- [ ] API 使用统计
 
 
 ## 测试策略

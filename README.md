@@ -1,22 +1,21 @@
 # FakeKey - API Key Proxy Agent
 
-FakeKey is a Rust-based CLI proxy application for managing and replacing API keys. By setting up a network proxy, applications can use fake keys, and FakeKey will automatically replace them with real keys in requests, thereby protecting sensitive credentials.
+In the era of popular AI Agents like Openclaw, ClaudeCode, etc., we have to expose various service API Tokens directly in environment variables. Your api_key gets stuffed into context and known by model service providers, known by the lobsters you trust, perhaps captured and read by some skill, and even more likely to be directly known when strangers ask your claw. There are too many leakage cases, I cannot trust to expose my credit card-bound api_key directly to any Agent and local environment variables, so FakeKey was born, the safest measure is to never expose the real api_key.
 
-## Core Features
+FakeKey is a high-performance API key proxy program developed in Rust. Through intelligent proxy technology, it can automatically replace fake keys with real keys in any network request, allowing your application code to avoid exposing real credentials while maintaining complete HTTP API compatibility and performance.
 
-### ✅ Implemented Features
+## How It Works
 
-- **HTTP/HTTPS Proxy** - Supports MITM-style HTTPS traffic decryption
-- **Key Management** - Add, list, view, delete API key configurations
-- **Fake Key Generation** - Automatically generates fake keys of the same length as original keys (with `_fk` suffix)
-- **Key Replacement** - Automatically replaces fake keys with real keys in headers, URL parameters, and request bodies
-- **Certificate Management** - Automatically generates and manages CA certificates and server certificates
-- **Configuration Encryption** - Uses AES-256-GCM encryption to protect configuration files
-- **Log Desensitization** - Automatically hides sensitive information in logs
-- **Audit Logging** - Records all critical operations to audit logs
-- **Service Templates** - Pre-configured templates for common services like OpenAI, GitHub, Anthropic
-- **Daemon Mode** - Supports background running
-- **Complete Testing** - Includes unit tests and integration tests
+```
+┌─────────────────┐         ┌──────────────────────────┐         ┌─────────────────┐
+│   Client App    │ HTTP/S  │   FakeKey Proxy          │ HTTP/S  │  External API   │
+│                 │────────▶│  1. TLS Decryption        │────────▶ │                 │
+│  Uses fake key  │         │  2. Identify and replace   │         │  Receives real  │
+│  sk-xxx_fk      │         │     fake key               │         │  key sk-xxx     │
+│                 │         │  3. Forward request        │         │                 │
+└─────────────────┘         └──────────────────────────┘         └─────────────────┘
+```
+
 
 ## Quick Start
 
@@ -30,25 +29,11 @@ cargo build --release
 cargo install --path .
 ```
 
-### Initialization
+### Initialize
 
 ```bash
-# Initialize configuration and CA certificates
+# Initialize configuration and CA certificate
 fakekey init
-
-# Output:
-# Initialized FakeKey at ~/.fakekey
-# Directory structure:
-#   ~/.fakekey/
-#   ├── config.yaml
-#   ├── certs/
-#   │   ├── ca/
-#   │   │   ├── cert.pem
-#   │   │   └── key.pem
-#   │   ├── cache/
-#   │   └── ca.crt
-#   ├── logs/
-#   └── pid
 ```
 
 ### Add API Keys
@@ -82,10 +67,10 @@ fakekey templates
 ### Start Proxy
 
 ```bash
-# Run in foreground
+# Foreground run
 fakekey start
 
-# Run in background (daemon mode)
+# Background run (daemon mode)
 fakekey start --daemon
 
 # Specify port
@@ -150,124 +135,14 @@ fakekey encrypt --enable
 fakekey encrypt --disable
 ```
 
-## Configuration File Example
-
-`~/.fakekey/config.yaml`:
-
-```yaml
-proxy:
-  port: 1157
-  log_level: info
-  data_dir: "~/.fakekey"
-  allowed_hosts:
-    - api.openai.com
-    - api.anthropic.com
-
-api_keys:
-  - service: openai
-    real_key: "sk-proj-real-key-here"
-    fake_key: "sk-proj-real-key-h_fk"
-    header_name: "Authorization"
-    scan_locations:
-      - type: header
-        name: Authorization
-    created_at: "2024-03-25T00:00:00Z"
-
-security:
-  encrypt_config: false
-```
-
-## Architecture Design
-
-```
-┌─────────────────┐         ┌──────────────────────────┐         ┌─────────────────┐
-│   Client App    │ HTTPS   │   FakeKey Proxy          │ HTTPS   │  External API   │
-│                 │────────▶│  1. TLS Decryption       │────────▶│                 │
-│  Uses Fake Key  │         │  2. Identify & Replace   │         │  Receives Real  │
-│  sk-xxx_fk      │         │  3. Forward Request      │         │  Key sk-xxx     │
-└─────────────────┘         └──────────────────────────┘         └─────────────────┘
-```
-
-## Module Description
-
-- **config** - Configuration management and fake key generation
-- **proxy** - HTTP/HTTPS proxy server
-- **cert** - CA certificate and server certificate management
-- **key_handler** - Key identification and replacement logic
-- **security** - Configuration encryption and data desensitization
-- **audit** - Audit logging
-- **templates** - Pre-configured service templates
-- **daemon** - Background process management
-
-## Testing
-
-```bash
-# Run all tests
-cargo test
-
-# Run specific tests
-cargo test test_key_replacement
-
-# View test coverage
-cargo test --verbose
-```
-
-Tests include:
-- 17 unit tests
-- 6 integration tests
-- Coverage of key replacement, configuration management, encryption, templates and other core functions
-
-## Security Considerations
+## Security
 
 1. **Key Protection** - Real keys are stored locally only, with optional encrypted storage
-2. **Certificate Security** - Locally generated CA certificates, private key files with 0600 permissions
+2. **Certificate Security** - Locally generated CA certificates, private key file permissions 0600
 3. **Network Security** - Only listens on local 127.0.0.1, supports host whitelist
 4. **Log Desensitization** - Automatically hides sensitive information
-5. **Audit Trail** - All critical operations recorded to audit logs
+5. **Audit Trail** - All critical operations are logged to audit logs
 
-## Use Cases
-
-### IDE Integration Development
-
-```bash
-# Configure FakeKey
-fakekey add --service openai --key "sk-real-key" --template
-fakekey start --daemon
-
-# Configure in IDE
-# API Key: sk-real-key_fk
-# Proxy: http://127.0.0.1:1157
-```
-
-### CI/CD Environment
-
-```bash
-# Use environment variables for configuration
-export FAKEKEY_PASSWORD="ci-secret"
-fakekey add --service github --key "$GITHUB_TOKEN" --template
-fakekey start
-```
-
-## Development
-
-```bash
-# Clone repository
-git clone https://github.com/happyvibing/fakekey.git
-cd fakekey
-
-# Build
-cargo build
-
-# Run
-cargo run -- init
-cargo run -- start
-
-# Format
-cargo fmt
-
-# Static check
-cargo clippy
-```
 
 ## License
 
