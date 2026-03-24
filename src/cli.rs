@@ -38,6 +38,10 @@ pub enum Commands {
         /// Header name for the key
         #[arg(long, default_value_t = String::from("Authorization"))]
         header: String,
+
+        /// Use predefined template for the service
+        #[arg(short, long)]
+        template: bool,
     },
 
     /// List all configured API keys
@@ -75,6 +79,16 @@ pub enum Commands {
 
     /// Stop the proxy server
     Stop,
+
+    /// List available service templates
+    Templates,
+
+    /// Enable or disable config encryption
+    Encrypt {
+        /// Enable encryption
+        #[arg(short, long)]
+        enable: bool,
+    },
 }
 
 #[derive(Subcommand)]

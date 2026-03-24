@@ -103,8 +103,16 @@ impl AppConfig {
         if !path.exists() {
             return Ok(Self::default());
         }
-        let content = fs::read_to_string(&path)
-            .with_context(|| format!("Failed to read config file: {}", path.display()))?;
+        
+        let content = if Self::is_encrypted(&path)? {
+            let password = crate::security::get_encryption_password()
+                .with_context(|| "Failed to get encryption password")?;
+            crate::security::decrypt_config_file(&path, &password)?
+        } else {
+            fs::read_to_string(&path)
+                .with_context(|| format!("Failed to read config file: {}", path.display()))?
+        };
+        
         let config: AppConfig = serde_yaml::from_str(&content)
             .with_context(|| "Failed to parse config file")?;
         Ok(config)
@@ -117,8 +125,15 @@ impl AppConfig {
             fs::create_dir_all(parent)?;
         }
         let content = serde_yaml::to_string(self)?;
-        fs::write(&path, content)
-            .with_context(|| format!("Failed to write config file: {}", path.display()))?;
+        
+        if self.security.encrypt_config {
+            let password = crate::security::get_encryption_password()
+                .with_context(|| "Failed to get encryption password")?;
+            crate::security::encrypt_config_file(&content, &path, &password)?;
+        } else {
+            fs::write(&path, content)
+                .with_context(|| format!("Failed to write config file: {}", path.display()))?;
+        }
         Ok(())
     }
 
@@ -148,6 +163,13 @@ impl AppConfig {
         let before = self.api_keys.len();
         self.api_keys.retain(|k| k.service != service);
         self.api_keys.len() < before
+    }
+
+    /// Check if config file is encrypted (not valid YAML)
+    fn is_encrypted(path: &Path) -> Result<bool> {
+        let content = fs::read_to_string(path)
+            .with_context(|| format!("Failed to read config file: {}", path.display()))?;
+        Ok(serde_yaml::from_str::<AppConfig>(&content).is_err())
     }
 }
 

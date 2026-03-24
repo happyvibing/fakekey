@@ -1,8 +1,12 @@
+mod audit;
 mod cert;
 mod cli;
 mod config;
+mod daemon;
 mod key_handler;
 mod proxy;
+mod security;
+mod templates;
 
 use anyhow::{Context, Result};
 use clap::Parser;
@@ -30,7 +34,8 @@ async fn main() -> Result<()> {
             service,
             key,
             header,
-        } => cmd_add(&service, &key, &header)?,
+            template,
+        } => cmd_add(&service, &key, &header, template)?,
         Commands::List => cmd_list()?,
         Commands::Show { service } => cmd_show(&service)?,
         Commands::Remove { service } => cmd_remove(&service)?,
@@ -40,6 +45,8 @@ async fn main() -> Result<()> {
             CertAction::Export { output } => cmd_cert_export(output)?,
         },
         Commands::Stop => cmd_stop()?,
+        Commands::Templates => cmd_templates()?,
+        Commands::Encrypt { enable } => cmd_encrypt(enable)?,
     }
 
     Ok(())
@@ -84,14 +91,15 @@ fn cmd_init() -> Result<()> {
 }
 
 /// Start the proxy server
-async fn cmd_start(port: u16, daemon: bool) -> Result<()> {
-    if daemon {
-        // TODO: Implement daemon mode with fork/double-fork or platform-specific daemonization
-        println!("Daemon mode is not yet implemented. Running in foreground.");
-    }
-
+async fn cmd_start(port: u16, daemon_mode: bool) -> Result<()> {
     let mut config = AppConfig::load()?;
     config.proxy.port = port;
+    let data_dir = config.data_dir();
+    let pid_file = data_dir.join("pid");
+
+    if daemon_mode && !daemon::is_daemon_mode() {
+        daemon::daemonize(&pid_file)?;
+    }
 
     let data_dir = config.data_dir();
     if !data_dir.exists() {
@@ -135,7 +143,7 @@ async fn cmd_start(port: u16, daemon: bool) -> Result<()> {
 }
 
 /// Add a new API key
-fn cmd_add(service: &str, key: &str, header: &str) -> Result<()> {
+fn cmd_add(service: &str, key: &str, header: &str, use_template: bool) -> Result<()> {
     let mut config = AppConfig::load()?;
 
     // Check if service already exists
@@ -150,17 +158,48 @@ fn cmd_add(service: &str, key: &str, header: &str) -> Result<()> {
     let existing_fake_keys: Vec<_> = config.api_keys.iter().map(|k| k.fake_key.as_str()).collect();
     let fake_key = generate_unique_fake_key(key, &existing_fake_keys);
 
-    let key_config = ApiKeyConfig {
-        service: service.to_string(),
-        real_key: key.to_string(),
-        fake_key: fake_key.clone(),
-        header_name: header.to_string(),
-        scan_locations: vec![ScanLocation::Header(header.to_string())],
-        created_at: chrono::Utc::now(),
+    let key_config = if use_template {
+        if let Some(template) = templates::get_template(service) {
+            println!("Using template: {}", template.description);
+            let mut config = template.to_api_key_config(key.to_string(), fake_key.clone());
+            config.scan_locations = vec![ScanLocation::Header(template.header_name.to_string())];
+            config
+        } else {
+            println!("No template found for '{}', using default configuration", service);
+            ApiKeyConfig {
+                service: service.to_string(),
+                real_key: key.to_string(),
+                fake_key: fake_key.clone(),
+                header_name: header.to_string(),
+                scan_locations: vec![ScanLocation::Header(header.to_string())],
+                created_at: chrono::Utc::now(),
+            }
+        }
+    } else {
+        ApiKeyConfig {
+            service: service.to_string(),
+            real_key: key.to_string(),
+            fake_key: fake_key.clone(),
+            header_name: header.to_string(),
+            scan_locations: vec![ScanLocation::Header(header.to_string())],
+            created_at: chrono::Utc::now(),
+        }
     };
 
     config.api_keys.push(key_config);
     config.save()?;
+
+    // Log audit event
+    if let Ok(data_dir) = std::env::var("FAKEKEY_DATA_DIR") {
+        let data_dir_path = std::path::PathBuf::from(data_dir);
+        if let Ok(logger) = audit::AuditLogger::new(&data_dir_path) {
+            let _ = logger.log(
+                audit::AuditEventType::KeyAdd,
+                format!("Added key for service: {}", service),
+                true,
+            );
+        }
+    }
 
     println!("Added API key for service: {}", service);
     println!("Fake key: {}", fake_key);
@@ -382,4 +421,58 @@ fn is_process_running(pid: u32) -> bool {
         // TODO: Implement process check on Windows
         false
     }
+}
+
+/// List available service templates
+fn cmd_templates() -> Result<()> {
+    println!("{:<15} {:<20} {:<50}", "SERVICE", "KEY PATTERN", "DESCRIPTION");
+    println!("{}", "-".repeat(85));
+
+    for template in templates::list_templates() {
+        println!(
+            "{:<15} {:<20} {:<50}",
+            template.name, template.key_pattern, template.description
+        );
+    }
+
+    println!("\nUse --template flag when adding a key:");
+    println!("  fakekey add --service openai --key \"sk-...\" --template");
+
+    Ok(())
+}
+
+/// Enable or disable config encryption
+fn cmd_encrypt(enable: bool) -> Result<()> {
+    let mut config = AppConfig::load()?;
+
+    if enable {
+        if config.security.encrypt_config {
+            println!("Config encryption is already enabled.");
+            return Ok(());
+        }
+
+        println!("Enabling config encryption...");
+        println!("Set FAKEKEY_PASSWORD environment variable for encryption/decryption.");
+
+        config.security.encrypt_config = true;
+        config.save()?;
+
+        println!("Config encryption enabled.");
+        println!("The config file will be encrypted on the next save.");
+    } else {
+        if !config.security.encrypt_config {
+            println!("Config encryption is already disabled.");
+            return Ok(());
+        }
+
+        println!("Disabling config encryption...");
+
+        config.security.encrypt_config = false;
+        config.save()?;
+
+        println!("Config encryption disabled.");
+        println!("The config file is now saved in plain text.");
+    }
+
+    Ok(())
 }
