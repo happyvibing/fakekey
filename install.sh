@@ -77,12 +77,17 @@ verify_checksum() {
 }
 
 main() {
+    local version="${1:-}"
+    if [ "$version" = "--dry-run" ]; then
+        version="${2:-}"
+        DRY_RUN=true
+    fi
+    
     info "Detecting platform..."
     local platform
     platform=$(detect_platform)
     info "Platform: ${platform}"
 
-    local version="${1:-}"
     if [ -z "$version" ]; then
         info "Fetching latest version..."
         version=$(get_latest_version)
