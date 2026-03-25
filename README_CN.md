@@ -85,11 +85,61 @@ fakekey stop
 fakekey logs
 ```
 
-### 在Agent或应用中设置代理
+### 一键启动工具（推荐）
+
+FakeKey 提供了便捷的方式来启动 CLI 工具，并自动配置代理保护：
+
+```bash
+# 启动 Claude Code 并自动配置代理保护
+fakekey run claude
+
+# 启动 OpenClaw 并自动配置代理保护
+fakekey run openclaw
+
+# 传递额外参数给工具
+fakekey run claude --help
+```
+
+该命令会自动完成以下操作：
+1. 检查代理是否运行，如果未运行则自动启动
+2. 设置所有必要的环境变量（HTTP_PROXY、HTTPS_PROXY、NODE_EXTRA_CA_CERTS 等）
+3. 启动工具并启用代理保护
+4. 您的所有 API 密钥都将自动受到保护！
+
+### 在 Agent 或应用中设置代理
+
+#### 一键启动工具（推荐）
+
+FakeKey 提供了便捷的方式来启动 CLI 工具，并自动配置代理保护：
+
+```bash
+# 启动 Claude Code 并自动配置代理保护
+fakekey run claude
+
+# 启动 OpenClaw 并自动配置代理保护
+fakekey run openclaw
+```
+
+该命令会自动完成以下操作：
+1. 检查代理是否运行，如果未运行则自动启动
+2. 设置所有必要的环境变量（HTTP_PROXY、HTTPS_PROXY、NODE_EXTRA_CA_CERTS 等）
+3. 启动工具并启用代理保护
+4. 您的所有 API 密钥都将自动受到保护！
+
+#### 手动配置
+
+如果您更喜欢手动配置：
 
 - 将生成的假 API KEY 代替真的应用到 Agent 或应用中
-- 在 Agent 或应用中设置网络代理为 `http://127.0.0.1:1155` EG: `export http_proxy=http://127.0.0.1:1155` `export https_proxy=http://127.0.0.1:1155`
+- 在 Agent 或应用中设置网络代理为 `http://127.0.0.1:1155`
 
+例如先设置网络代理: 
+```bash
+export http_proxy=http://127.0.0.1:1155
+export https_proxy=http://127.0.0.1:1155
+export NODE_EXTRA_CA_CERTS=~/.fakekey/certs/ca.crt
+```
+然后再启动 Agent 如 `claude`、`openclaw`、`pi`
 
 ## 安全
 

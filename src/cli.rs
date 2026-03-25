@@ -89,6 +89,16 @@ pub enum Commands {
 
     /// Interactive setup wizard
     Onboard,
+
+    /// Run a CLI tool with proxy automatically configured
+    Run {
+        /// Tool name (e.g., claude, openclaw)
+        tool: String,
+
+        /// Additional arguments to pass to the tool
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
+    },
 }
 
 #[derive(Subcommand)]

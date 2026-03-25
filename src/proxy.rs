@@ -344,8 +344,14 @@ async fn forward_request(
     let mut headers = req.headers().clone();
 
     let (final_uri, uri_replaced) = key_handler::replace_in_url(upstream_uri, key_map);
+    
+    // Extract host from upstream_uri for logging
+    let parsed_uri: hyper::Uri = upstream_uri.parse()
+        .with_context(|| format!("Invalid upstream URI: {}", upstream_uri))?;
+    let host = parsed_uri.host().unwrap_or("unknown");
+    
     if uri_replaced {
-        info!("Replaced key in URL");
+        info!("Replaced key in URL for {}", host);
         if let Some(logger) = audit_logger {
             let _ = logger.log_key_replacement("URL");
         }
@@ -359,9 +365,9 @@ async fn forward_request(
         let (new_value, replaced) = key_handler::replace_in_header_value(value_str, key_map);
         if replaced {
             header_replacements += 1;
-            info!("Replaced key in header: {}", name);
+            info!("Replaced key in header: {} for {}", name, host);
             if let Some(logger) = audit_logger {
-                let _ = logger.log_key_replacement(&format!("Header: {}", name));
+                let _ = logger.log_key_replacement(&format!("Header: {} for {}", name, host));
             }
         }
         if let Ok(v) = hyper::header::HeaderValue::from_str(&new_value) {
@@ -386,9 +392,9 @@ async fn forward_request(
     // Replace keys in body
     let (final_body, body_replaced) = key_handler::replace_in_body(&body_bytes, key_map);
     if body_replaced {
-        info!("Replaced key in request body");
+        info!("Replaced key in request body for {}", host);
         if let Some(logger) = audit_logger {
-            let _ = logger.log_key_replacement("Body");
+            let _ = logger.log_key_replacement(&format!("Body for {}", host));
         }
     }
 

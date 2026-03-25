@@ -7,12 +7,14 @@ mod key_handler;
 mod proxy;
 mod security;
 mod templates;
+mod tool_launcher;
 
 use anyhow::{Context, Result};
 use clap::Parser;
 use cli::{CertAction, Cli, Commands};
 use config::{generate_unique_fake_key, init_data_dir, AppConfig, ApiKeyConfig, ScanLocation};
 use std::net::SocketAddr;
+use std::process::Stdio;
 use std::sync::Arc;
 
 #[tokio::main]
@@ -54,6 +56,7 @@ async fn main() -> Result<()> {
         Commands::Stop => cmd_stop()?,
         Commands::Templates => cmd_templates()?,
         Commands::Onboard => cmd_onboard().await?,
+        Commands::Run { tool, args } => cmd_run(&tool, &args).await?,
     }
 
     Ok(())
@@ -500,6 +503,117 @@ fn cmd_templates() -> Result<()> {
     Ok(())
 }
 
+/// Detect the user's shell and return (shell_name, rc_file_path)
+fn detect_shell_and_rc() -> (String, std::path::PathBuf) {
+    let home = dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("."));
+    let shell = std::env::var("SHELL").unwrap_or_default();
+
+    if shell.contains("zsh") {
+        ("zsh".to_string(), home.join(".zshrc"))
+    } else if shell.contains("fish") {
+        ("fish".to_string(), home.join(".config/fish/config.fish"))
+    } else if shell.contains("bash") {
+        // On macOS, prefer .bash_profile; on Linux prefer .bashrc
+        let rc = if cfg!(target_os = "macos") {
+            if home.join(".bash_profile").exists() {
+                home.join(".bash_profile")
+            } else {
+                home.join(".bashrc")
+            }
+        } else {
+            home.join(".bashrc")
+        };
+        ("bash".to_string(), rc)
+    } else {
+        // Fallback: use .profile
+        ("sh".to_string(), home.join(".profile"))
+    }
+}
+
+/// Setup shell environment variables for CA certificate trust.
+/// Adds NODE_EXTRA_CA_CERTS, SSL_CERT_FILE, REQUESTS_CA_BUNDLE to the shell RC file.
+/// Returns Ok(true) if changes were made, Ok(false) if already configured.
+fn setup_shell_env_vars(ca_cert_path: &std::path::Path) -> Result<bool> {
+    use std::io::Write;
+
+    let (shell_name, rc_path) = detect_shell_and_rc();
+    let ca_path_str = ca_cert_path.to_string_lossy();
+
+    // Marker to identify our block
+    let marker = "# >>> fakekey CA certificate environment variables >>>";
+    let marker_end = "# <<< fakekey CA certificate environment variables <<<";
+
+    // Check if already configured
+    if rc_path.exists() {
+        let content = std::fs::read_to_string(&rc_path)
+            .with_context(|| format!("Failed to read {}", rc_path.display()))?;
+        if content.contains(marker) {
+            println!("   ✅ Environment variables already configured in {}", rc_path.display());
+            return Ok(false);
+        }
+    }
+
+    // Generate the env block based on shell type
+    let env_block = if shell_name == "fish" {
+        format!(
+            r#"
+{marker}
+set -gx NODE_EXTRA_CA_CERTS "{ca_path}"
+set -gx SSL_CERT_FILE "{ca_path}"
+set -gx REQUESTS_CA_BUNDLE "{ca_path}"
+{marker_end}
+"#,
+            marker = marker,
+            marker_end = marker_end,
+            ca_path = ca_path_str,
+        )
+    } else {
+        format!(
+            r#"
+{marker}
+export NODE_EXTRA_CA_CERTS="{ca_path}"
+export SSL_CERT_FILE="{ca_path}"
+export REQUESTS_CA_BUNDLE="{ca_path}"
+{marker_end}
+"#,
+            marker = marker,
+            marker_end = marker_end,
+            ca_path = ca_path_str,
+        )
+    };
+
+    // Ensure parent directory exists (for fish)
+    if let Some(parent) = rc_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    // Append to RC file
+    let mut file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&rc_path)
+        .with_context(|| format!("Failed to open {} for writing", rc_path.display()))?;
+
+    file.write_all(env_block.as_bytes())
+        .with_context(|| format!("Failed to write to {}", rc_path.display()))?;
+
+    println!("   ✅ Added environment variables to {}", rc_path.display());
+    println!();
+    println!("   The following variables were added:");
+    println!("   • NODE_EXTRA_CA_CERTS  — for Node.js (Claude Code, VS Code, etc.)");
+    println!("   • SSL_CERT_FILE        — for Go, Ruby, and other tools");
+    println!("   • REQUESTS_CA_BUNDLE   — for Python requests library");
+    println!();
+    println!("   🔄 To apply now, run:");
+    if shell_name == "fish" {
+        println!("      source {}", rc_path.display());
+    } else {
+        println!("      source {}", rc_path.display());
+    }
+
+    Ok(true)
+}
+
 /// Interactive setup wizard
 async fn cmd_onboard() -> Result<()> {
     println!("🚀 Welcome to FakeKey Interactive Setup!");
@@ -562,6 +676,29 @@ async fn cmd_onboard() -> Result<()> {
     } else {
         println!("✅ Certificate trusted!");
         println!();
+    }
+
+    // Step 2b: Setup shell environment variables for CA trust
+    println!("🌐 Configuring shell environment for CA certificate trust...");
+    let (shell_name, rc_path) = detect_shell_and_rc();
+    println!("   Detected shell: {} ({})", shell_name, rc_path.display());
+    let ca_cert_path = data_dir.join("certs").join("ca.crt");
+    match setup_shell_env_vars(&ca_cert_path) {
+        Ok(true) => {
+            println!();
+        }
+        Ok(false) => {
+            // Already configured, message printed inside the function
+            println!();
+        }
+        Err(e) => {
+            println!("   ⚠️  Failed to auto-configure shell environment: {}", e);
+            println!("   You can manually add these to your {}:", rc_path.display());
+            println!("      export NODE_EXTRA_CA_CERTS=\"{}\"", ca_cert_path.display());
+            println!("      export SSL_CERT_FILE=\"{}\"", ca_cert_path.display());
+            println!("      export REQUESTS_CA_BUNDLE=\"{}\"", ca_cert_path.display());
+            println!();
+        }
     }
 
     // Step 3: Add API keys
@@ -717,7 +854,7 @@ async fn cmd_onboard() -> Result<()> {
         println!();
     }
 
-    // Step 5: Start proxy
+    // Step 4: Start proxy
     println!("🚀 Step 4: Start Proxy");
     println!("   Ready to start the proxy server!");
     println!();
@@ -789,6 +926,85 @@ async fn cmd_onboard() -> Result<()> {
     println!();
     println!("📚 Need help? Check the documentation or run: fakekey --help");
 
+    Ok(())
+}
+
+/// Run a CLI tool with proxy automatically configured
+async fn cmd_run(tool_name: &str, args: &[String]) -> Result<()> {
+    let tool = tool_launcher::get_tool(tool_name)
+        .ok_or_else(|| anyhow::anyhow!("Unknown tool: {}", tool_name))?;
+    
+    let config = AppConfig::load()?;
+    let data_dir = config.data_dir();
+    
+    if !data_dir.exists() {
+        anyhow::bail!(
+            "FakeKey not initialized. Run `fakekey init` first."
+        );
+    }
+    
+    let ca_cert_path = data_dir.join("certs").join("ca.crt");
+    if !ca_cert_path.exists() {
+        anyhow::bail!(
+            "CA certificate not found. Run `fakekey init` first."
+        );
+    }
+    
+    let pid_file = data_dir.join("pid");
+    let mut proxy_running = false;
+    
+    if pid_file.exists() {
+        if let Ok(pid_str) = std::fs::read_to_string(&pid_file) {
+            if let Ok(pid) = pid_str.trim().parse::<u32>() {
+                if is_process_running(pid) {
+                    proxy_running = true;
+                    println!("✅ Proxy is running (PID: {})", pid);
+                }
+            }
+        }
+    }
+    
+    if !proxy_running {
+        println!("🔄 Proxy is not running. Starting proxy in background...");
+        
+        use std::process::Command;
+        let current_exe = std::env::current_exe()
+            .with_context(|| "Failed to get current executable path")?;
+        
+        let mut child = Command::new(current_exe)
+            .arg("start")
+            .arg("--daemon")
+            .arg("--port")
+            .arg(config.proxy.port.to_string())
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .with_context(|| "Failed to start proxy")?;
+        
+        child.wait()
+            .with_context(|| "Failed to wait for proxy startup")?;
+        
+        std::thread::sleep(std::time::Duration::from_secs(1));
+        
+        if pid_file.exists() {
+            if let Ok(pid_str) = std::fs::read_to_string(&pid_file) {
+                if let Ok(pid) = pid_str.trim().parse::<u32>() {
+                    if is_process_running(pid) {
+                        println!("✅ Proxy started successfully (PID: {})", pid);
+                        proxy_running = true;
+                    }
+                }
+            }
+        }
+        
+        if !proxy_running {
+            anyhow::bail!("Failed to start proxy. Try running `fakekey start --daemon` manually.");
+        }
+    }
+    
+    tool_launcher::launch_tool(tool, args, config.proxy.port, &ca_cert_path)?;
+    
     Ok(())
 }
 

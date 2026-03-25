@@ -1,6 +1,6 @@
 # FakeKey - API Key Proxy Agent
 
-In the era of AI Agents like Openclaw, ClaudeCode, etc., we have to expose various service API tokens directly in environment variables. Your api_key will be inserted into context and known by model service providers, known by the lobsters you trust, perhaps captured and read by some skill, and more likely to be directly known when strangers ask your lobster. With too many leakage cases, I cannot trust to expose my credit card-bound api_key directly to any Agent and local environment variables. Thus, FakeKey was born - the safest measure is to never expose the real api_key.
+In the era of AI Agents like Openclaw, ClaudeCode, etc., we have to expose various service API Tokens directly in environment variables. Your api_key will be inserted into context and known by model service providers, known by the lobsters you trust, perhaps captured and read by some skill, and even more likely to be directly learned by strangers asking your lobster. There are too many leak cases, I cannot trust to bind my credit card-linked api_key directly exposed to any Agent and local environment variables, so FakeKey was created, the safest measure is to never expose the real api_key.
 
 FakeKey is a high-performance API key proxy program developed in Rust. Through intelligent proxy technology, it can automatically replace fake keys with real keys in any network request without exposing real credentials, while maintaining complete HTTP API compatibility and performance.
 
@@ -10,8 +10,8 @@ FakeKey is a high-performance API key proxy program developed in Rust. Through i
 ┌─────────────────┐         ┌──────────────────────────┐         ┌─────────────────┐
 │   Client Agent  │ HTTP/S  │   FakeKey Proxy          │ HTTP/S  │  External API   │
 │                 │────────▶│  1. TLS Decryption        │────────▶ │                 │
-│  Uses fake key   │         │  2. Identify and replace    │         │  Receives real key│
-│  sk-xxx_fk      │         │  3. Forward request         │         │  sk-xxx         │
+│  Uses fake key   │         │  2. Identify & replace key │         │  Receives real key│
+│  sk-xxx_fk      │         │  3. Forward request        │         │  sk-xxx         │
 └─────────────────┘         └──────────────────────────┘         └─────────────────┘
 ```
 
@@ -34,7 +34,7 @@ cargo install --path .
 fakekey onboard
 ```
 
-During the process, you will be prompted to trust the CA certificate. For first-time use, you need to add the CA certificate to the system trust list:
+During the process, you'll be prompted to trust the CA certificate. For first-time use, you need to add the CA certificate to the system trust list:
 
 ```bash
 # macOS
@@ -50,10 +50,10 @@ sudo update-ca-certificates
 
 ```bash
 
-# Generate OpenAI type fake key
+# Generate OpenAI type fake KEY
 fakekey add --name my-openai-key --key "sk-proj-xxxxx" --template openai
 
-# Generate fake key with custom header
+# Generate fake KEY with custom header
 fakekey add --name my-custom --key "xxxxx" --header "X-Custom-Key"
 
 # View available templates
@@ -84,19 +84,69 @@ fakekey stop
 fakekey logs
 ```
 
-### Setting Up Proxy in Agent or Application
+### One-Click Tool Launch (Recommended)
 
-- Replace the real API KEY with the generated fake API KEY in your Agent or application
-- Set the network proxy to `http://127.0.0.1:1155` in your Agent or application. EG: `export http_proxy=http://127.0.0.1:1155` `export https_proxy=http://127.0.0.1:1155`
+FakeKey provides a convenient way to launch CLI tools with automatic proxy protection:
 
+```bash
+# Launch Claude Code with automatic proxy protection
+fakekey run claude
+
+# Launch OpenClaw with automatic proxy protection
+fakekey run openclaw
+
+# Pass additional arguments to the tool
+fakekey run claude --help
+```
+
+This command automatically completes the following operations:
+1. Check if the proxy is running, start it automatically if not
+2. Set all necessary environment variables (HTTP_PROXY, HTTPS_PROXY, NODE_EXTRA_CA_CERTS, etc.)
+3. Launch the tool with proxy protection enabled
+4. All your API keys will be automatically protected!
+
+### Setting Up Proxy in Agents or Applications
+
+#### One-Click Tool Launch (Recommended)
+
+FakeKey provides a convenient way to launch CLI tools with automatic proxy protection:
+
+```bash
+# Launch Claude Code with automatic proxy protection
+fakekey run claude
+
+# Launch OpenClaw with automatic proxy protection
+fakekey run openclaw
+```
+
+This command automatically completes the following operations:
+1. Check if the proxy is running, start it automatically if not
+2. Set all necessary environment variables (HTTP_PROXY, HTTPS_PROXY, NODE_EXTRA_CA_CERTS, etc.)
+3. Launch the tool with proxy protection enabled
+4. All your API keys will be automatically protected!
+
+#### Manual Configuration
+
+If you prefer manual configuration:
+
+- Replace real API keys with generated fake keys in your Agent or application
+- Set the network proxy to `http://127.0.0.1:1155` in your Agent or application
+
+For example, first set the network proxy:
+```bash
+export http_proxy=http://127.0.0.1:1155
+export https_proxy=http://127.0.0.1:1155
+export NODE_EXTRA_CA_CERTS=~/.fakekey/certs/ca.crt
+```
+Then launch your Agent such as `claude`, `openclaw`, `pi`
 
 ## Security
 
-1. **Key Protection** - Real keys are stored locally only, configuration files are automatically encrypted using CA private key (JSON format)
-2. **Certificate Security** - Locally generated CA certificate, private key file permissions 0600, also used for configuration encryption
+1. **Key Protection** - Real keys are stored locally only, configuration files are automatically encrypted with CA private key (JSON format)
+2. **Certificate Security** - Locally generated CA certificates, private key file permissions 0600, also used for configuration encryption
 3. **Network Security** - Only listens on local 127.0.0.1, supports host whitelist
 4. **Log Desensitization** - Automatically hides sensitive information
-5. **Audit Trail** - All critical operations are recorded to audit logs
+5. **Audit Trail** - All key operations are logged to audit logs
 
 
 ## License
