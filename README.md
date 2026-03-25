@@ -20,13 +20,44 @@ FakeKey is a high-performance API key proxy program developed in Rust. Through i
 
 ### Installation
 
-```bash
-# Build from source
-cargo build --release
+#### Quick Install (macOS / Linux)
 
-# Install to system
-cargo install --path .
+```bash
+curl -fsSL https://raw.githubusercontent.com/happyvibing/fakekey/main/install.sh | bash
 ```
+
+#### Homebrew (macOS / Linux)
+
+```bash
+brew install happyvibing/tap/fakekey
+```
+
+#### Cargo (from crates.io)
+
+```bash
+cargo install fakekey
+```
+
+#### Build from Source
+
+```bash
+git clone https://github.com/happyvibing/fakekey.git
+cd fakekey
+cargo build --release
+# Binary at: target/release/fakekey
+```
+
+#### Download Pre-built Binary
+
+Pre-built binaries for all platforms are available on the [GitHub Releases](https://github.com/happyvibing/fakekey/releases) page:
+
+| Platform | File |
+|----------|------|
+| macOS (Apple Silicon) | `fakekey-macos-arm64.tar.gz` |
+| macOS (Intel) | `fakekey-macos-amd64.tar.gz` |
+| Linux (x86_64) | `fakekey-linux-amd64.tar.gz` |
+| Linux (ARM64) | `fakekey-linux-arm64.tar.gz` |
+| Windows (x86_64) | `fakekey-windows-amd64.zip` |
 
 ### One-Click Initialization
 
@@ -49,7 +80,6 @@ sudo update-ca-certificates
 ### Basic Commands
 
 ```bash
-
 # Generate OpenAI type fake KEY
 fakekey add --name my-openai-key --key "sk-proj-xxxxx" --template openai
 
@@ -105,27 +135,7 @@ This command automatically completes the following operations:
 3. Launch the tool with proxy protection enabled
 4. All your API keys will be automatically protected!
 
-### Setting Up Proxy in Agents or Applications
-
-#### One-Click Tool Launch (Recommended)
-
-FakeKey provides a convenient way to launch CLI tools with automatic proxy protection:
-
-```bash
-# Launch Claude Code with automatic proxy protection
-fakekey run claude
-
-# Launch OpenClaw with automatic proxy protection
-fakekey run openclaw
-```
-
-This command automatically completes the following operations:
-1. Check if the proxy is running, start it automatically if not
-2. Set all necessary environment variables (HTTP_PROXY, HTTPS_PROXY, NODE_EXTRA_CA_CERTS, etc.)
-3. Launch the tool with proxy protection enabled
-4. All your API keys will be automatically protected!
-
-#### Manual Configuration
+### Manual Proxy Configuration
 
 If you prefer manual configuration:
 

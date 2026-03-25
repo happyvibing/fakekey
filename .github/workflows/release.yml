@@ -18,7 +18,7 @@ jobs:
       - run: cargo test --verbose
 
   build:
-    name: Build
+    name: Build ${{ matrix.name }}
     needs: test
     strategy:
       matrix:
@@ -26,27 +26,64 @@ jobs:
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
             name: fakekey-linux-amd64
+            archive: tar.gz
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-latest
+            name: fakekey-linux-arm64
+            archive: tar.gz
           - target: x86_64-apple-darwin
             os: macos-latest
             name: fakekey-macos-amd64
+            archive: tar.gz
           - target: aarch64-apple-darwin
             os: macos-latest
             name: fakekey-macos-arm64
+            archive: tar.gz
           - target: x86_64-pc-windows-msvc
             os: windows-latest
-            name: fakekey-windows-amd64.exe
+            name: fakekey-windows-amd64
+            archive: zip
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
-      - run: cargo build --release --target ${{ matrix.target }}
-      - run: strip target/${{ matrix.target }}/release/fakekey.exe || strip target/${{ matrix.target }}/release/fakekey || true
+
+      - name: Install cross-compilation tools (Linux ARM64)
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+          echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
+
+      - name: Build
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Strip binary (Unix)
+        if: matrix.os != 'windows-latest' && matrix.target != 'aarch64-unknown-linux-gnu'
+        run: strip target/${{ matrix.target }}/release/fakekey
+
+      - name: Strip binary (Linux ARM64)
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: aarch64-linux-gnu-strip target/${{ matrix.target }}/release/fakekey
+
+      - name: Package (tar.gz)
+        if: matrix.archive == 'tar.gz'
+        run: |
+          cd target/${{ matrix.target }}/release
+          tar czf ../../../${{ matrix.name }}.tar.gz fakekey
+          cd ../../..
+
+      - name: Package (zip)
+        if: matrix.archive == 'zip'
+        shell: pwsh
+        run: Compress-Archive -Path target/${{ matrix.target }}/release/fakekey.exe -DestinationPath ${{ matrix.name }}.zip
+
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.name }}
-          path: target/${{ matrix.target }}/release/fakekey*
+          path: ${{ matrix.name }}.${{ matrix.archive }}
 
   release:
     name: Release
@@ -59,10 +96,22 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
+
+      - name: Generate checksums
+        run: |
+          cd artifacts
+          find . -type f \( -name '*.tar.gz' -o -name '*.zip' \) -exec mv {} . \;
+          find . -type d -empty -delete
+          sha256sum *.tar.gz *.zip > checksums-sha256.txt
+          cat checksums-sha256.txt
+
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          files: artifacts/*/fakekey*
+          files: |
+            artifacts/*.tar.gz
+            artifacts/*.zip
+            artifacts/checksums-sha256.txt
           generate_release_notes: true
           draft: false
           prerelease: false

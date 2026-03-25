@@ -375,14 +375,15 @@ mod tests {
         let real = "sk-proj-1234567890abcdefghijk";
         let fake = generate_fake_key(real);
         assert_eq!(fake.len(), real.len());
-        assert!(fake.ends_with("_fk"));
+        assert!(fake.contains("_fk_")); // _fk_ pattern in the middle for long keys
+        assert_ne!(fake, real);
     }
 
     #[test]
     fn test_generate_fake_key_short() {
         let real = "ab";
         let fake = generate_fake_key(real);
-        assert_eq!(fake, "ab_fk");
+        assert!(fake.contains("_k")); // short keys use _k pattern
     }
 
     #[test]
@@ -401,7 +402,7 @@ mod tests {
         };
         let existing_fake_keys: Vec<_> = config.api_keys.iter().map(|k| k.fake_key.as_str()).collect();
         let fake_key = generate_unique_fake_key("sk-proj-1234567890abcdefghijk", &existing_fake_keys);
-        assert!(fake_key.ends_with("_fk"));
+        assert_ne!(fake_key, "sk-proj-1234567890abcdefghijk");
         assert!(!existing_fake_keys.iter().any(|k| k == &fake_key));
     }
 

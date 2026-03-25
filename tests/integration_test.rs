@@ -31,7 +31,7 @@ fn test_key_replacement() {
 
 #[test]
 fn test_config_management() {
-    use fakekey::config::{ApiKeyConfig, AppConfig, ProxyConfig, ScanLocation, SecurityConfig};
+    use fakekey::config::{ApiKeyConfig, AppConfig, ProxyConfig, ScanLocation};
     
     let temp_dir = TempDir::new().unwrap();
 
@@ -42,18 +42,17 @@ fn test_config_management() {
             log_level: "info".to_string(),
             data_dir: temp_dir.path().to_string_lossy().to_string(),
             allowed_hosts: vec!["api.openai.com".to_string()],
+            enable_domain_filtering: true,
         },
         api_keys: vec![ApiKeyConfig {
-            service: "openai".to_string(),
+            name: "openai".to_string(),
             real_key: "sk-real123".to_string(),
             fake_key: "sk-fake_fk".to_string(),
             header_name: "Authorization".to_string(),
             scan_locations: vec![ScanLocation::Header("Authorization".to_string())],
+            endpoints: vec!["api.openai.com".to_string()],
             created_at: chrono::Utc::now(),
         }],
-        security: SecurityConfig {
-            encrypt_config: false,
-        },
     };
 
     // Test key map building
@@ -61,12 +60,12 @@ fn test_config_management() {
     assert_eq!(key_map.len(), 1);
     assert_eq!(key_map.get("sk-fake_fk"), Some(&"sk-real123".to_string()));
 
-    // Test find by service
-    assert!(config.find_by_service("openai").is_some());
-    assert!(config.find_by_service("github").is_none());
+    // Test find by name
+    assert!(config.find_by_name("openai").is_some());
+    assert!(config.find_by_name("github").is_none());
 
-    // Test remove by service
-    assert!(config.remove_by_service("openai"));
+    // Test remove by name
+    assert!(config.remove_by_name("openai"));
     assert_eq!(config.api_keys.len(), 0);
 }
 
@@ -78,7 +77,7 @@ fn test_fake_key_generation() {
     let fake_key = generate_fake_key(real_key);
 
     assert_eq!(fake_key.len(), real_key.len());
-    assert!(fake_key.ends_with("_fk"));
+    assert!(fake_key.contains("_fk_")); // _fk_ pattern in the middle for long keys
     assert_ne!(fake_key, real_key);
 }
 
@@ -96,21 +95,13 @@ fn test_key_masking() {
 }
 
 #[test]
-fn test_encryption() {
-    use fakekey::security::{decrypt_data, encrypt_data};
+fn test_sensitive_data_masking() {
+    use fakekey::security::mask_sensitive;
 
-    let data = b"sensitive config data";
-    let password = "test_password_123";
-
-    let encrypted = encrypt_data(data, password).unwrap();
-    assert_ne!(encrypted.as_slice(), data);
-
-    let decrypted = decrypt_data(&encrypted, password).unwrap();
-    assert_eq!(decrypted, data);
-
-    // Wrong password should fail
-    let result = decrypt_data(&encrypted, "wrong_password");
-    assert!(result.is_err());
+    let text = r#"Authorization: Bearer sk-proj-1234567890abcdef other"#;
+    let masked = mask_sensitive(text, &["Bearer "]);
+    assert!(masked.contains("****"));
+    assert!(!masked.contains("1234567890abcdef"));
 }
 
 #[test]

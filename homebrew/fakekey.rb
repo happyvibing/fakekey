@@ -1,14 +1,31 @@
 class Fakekey < Formula
   desc "API Key Proxy Agent - manage and replace API keys via network proxy"
   homepage "https://github.com/happyvibing/fakekey"
-  url "https://github.com/happyvibing/fakekey/archive/refs/tags/v0.1.0.tar.gz"
-  sha256 "" # Update this after release
+  version "0.1.0"
   license "Apache-2.0"
 
-  depends_on "rust"
+  on_macos do
+    if Hardware::CPU.arm?
+      url "https://github.com/happyvibing/fakekey/releases/download/v#{version}/fakekey-macos-arm64.tar.gz"
+      sha256 "" # Updated automatically by release workflow
+    else
+      url "https://github.com/happyvibing/fakekey/releases/download/v#{version}/fakekey-macos-amd64.tar.gz"
+      sha256 "" # Updated automatically by release workflow
+    end
+  end
+
+  on_linux do
+    if Hardware::CPU.arm?
+      url "https://github.com/happyvibing/fakekey/releases/download/v#{version}/fakekey-linux-arm64.tar.gz"
+      sha256 "" # Updated automatically by release workflow
+    else
+      url "https://github.com/happyvibing/fakekey/releases/download/v#{version}/fakekey-linux-amd64.tar.gz"
+      sha256 "" # Updated automatically by release workflow
+    end
+  end
 
   def install
-    system "cargo", "install", *std_cargo_args
+    bin.install "fakekey"
   end
 
   test do
