@@ -15,6 +15,7 @@ use tracing::{debug, error, info, warn};
 
 use crate::audit::{AuditEventType, AuditLogger};
 use crate::cert::CertManager;
+use crate::config::AppConfig;
 use crate::key_handler;
 
 /// Shared state for the proxy server
@@ -23,6 +24,7 @@ pub struct ProxyState {
     pub cert_manager: Arc<CertManager>,
     pub allowed_hosts: Vec<String>,
     pub audit_logger: Option<Arc<AuditLogger>>,
+    pub config: Arc<AppConfig>,
 }
 
 /// Start the proxy server on the given address
@@ -121,6 +123,16 @@ async fn handle_connect(
         return Ok(resp);
     }
 
+    // Check if domain filtering is enabled and if this domain needs MITM
+    if state.config.proxy.enable_domain_filtering {
+        if !state.config.needs_mitm_for_domain(&domain) {
+            info!("Skipping MITM for {} (no API keys configured for this domain)", domain);
+            // For domains that don't need MITM, we can act as a simple TCP tunnel
+            return handle_simple_tunnel(req, host, domain, state).await;
+        }
+        debug!("MITM required for {} (API keys may be used)", domain);
+    }
+
     // Respond with 200 to establish the tunnel
     tokio::task::spawn(async move {
         match hyper::upgrade::on(req).await {
@@ -136,6 +148,68 @@ async fn handle_connect(
     });
 
     Ok(Response::new(Full::new(Bytes::new())))
+}
+
+/// Handle CONNECT as a simple TCP tunnel without MITM
+async fn handle_simple_tunnel(
+    req: Request<Incoming>,
+    host: String,
+    domain: String,
+    state: Arc<ProxyState>,
+) -> Result<Response<Full<Bytes>>, hyper::Error> {
+    // Connect to upstream server
+    let upstream_stream = match TcpStream::connect(&host).await {
+        Ok(stream) => stream,
+        Err(e) => {
+            error!("Failed to connect to upstream {}: {}", host, e);
+            let resp = Response::builder()
+                .status(StatusCode::BAD_GATEWAY)
+                .body(Full::new(Bytes::from(format!("Failed to connect: {}", e))))
+                .unwrap();
+            return Ok(resp);
+        }
+    };
+
+    // Log the connection if audit logger is available
+    if let Some(logger) = &state.audit_logger {
+        let _ = logger.log(
+            AuditEventType::RequestProcessed,
+            format!("TCP tunnel established to {} (no MITM)", domain),
+            false,
+        );
+    }
+
+    // Respond with 200 to establish the tunnel
+    tokio::task::spawn(async move {
+        match hyper::upgrade::on(req).await {
+            Ok(upgraded) => {
+                if let Err(e) = handle_tcp_tunnel(upgraded, upstream_stream).await {
+                    error!("TCP tunnel error for {}: {}", host, e);
+                }
+            }
+            Err(e) => {
+                error!("Upgrade error for {}: {}", host, e);
+            }
+        }
+    });
+
+    Ok(Response::new(Full::new(Bytes::new())))
+}
+
+/// Handle simple TCP tunnel without TLS interception
+async fn handle_tcp_tunnel(
+    client_stream: hyper::upgrade::Upgraded,
+    upstream_stream: TcpStream,
+) -> Result<()> {
+    let mut client_io = TokioIo::new(client_stream);
+    let mut upstream_io = upstream_stream;
+
+    let (bytes_up, bytes_down) = tokio::io::copy_bidirectional(&mut client_io, &mut upstream_io)
+        .await
+        .with_context(|| "TCP tunnel copy failed")?;
+
+    debug!("TCP tunnel closed: {} bytes up, {} bytes down", bytes_up, bytes_down);
+    Ok(())
 }
 
 /// Handle the MITM tunnel: TLS accept from client, then proxy to upstream
@@ -168,7 +242,9 @@ async fn handle_tunnel(
             
             // Handle different types of TLS errors
             if error_str.contains("eof") || error_str.contains("UnexpectedEof") {
-                warn!("Client closed TLS connection early for {} - this might be normal behavior", domain);
+                warn!("Client closed TLS connection early for {} - the client likely does not trust the MITM CA certificate. \
+                       For Node.js clients (e.g. Claude Code), set NODE_EXTRA_CA_CERTS to the CA cert path. \
+                       For non-MITM tunneling, remove this domain from the API key endpoints.", domain);
                 return Err(anyhow::anyhow!("Client closed TLS connection early for {}", domain));
             } else if error_str.contains("InvalidContentType") {
                 warn!("Client sent non-TLS data to TLS port for {} - possibly HTTP request to HTTPS port", domain);

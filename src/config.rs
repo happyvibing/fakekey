@@ -23,6 +23,8 @@ pub struct ProxyConfig {
     pub data_dir: String,
     #[serde(default)]
     pub allowed_hosts: Vec<String>,
+    #[serde(default = "default_domain_filtering")]
+    pub enable_domain_filtering: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -34,6 +36,8 @@ pub struct ApiKeyConfig {
     pub header_name: String,
     #[serde(default)]
     pub scan_locations: Vec<ScanLocation>,
+    #[serde(default)]
+    pub endpoints: Vec<String>, // 具体的端点域名列表
     #[serde(default = "Utc::now")]
     pub created_at: DateTime<Utc>,
 }
@@ -70,6 +74,10 @@ fn default_header_name() -> String {
     "Authorization".to_string()
 }
 
+fn default_domain_filtering() -> bool {
+    true // Enable domain filtering by default for better performance
+}
+
 impl Default for ProxyConfig {
     fn default() -> Self {
         Self {
@@ -77,6 +85,7 @@ impl Default for ProxyConfig {
             log_level: default_log_level(),
             data_dir: default_data_dir(),
             allowed_hosts: Vec::new(),
+            enable_domain_filtering: default_domain_filtering(),
         }
     }
 }
@@ -203,6 +212,26 @@ impl AppConfig {
         let before = self.api_keys.len();
         self.api_keys.retain(|k| k.name != name);
         self.api_keys.len() < before
+    }
+
+    /// Check if any configured API keys might be used for the given domain
+    /// This helps determine if MITM is needed for a domain
+    pub fn needs_mitm_for_domain(&self, domain: &str) -> bool {
+        if self.api_keys.is_empty() {
+            return false;
+        }
+
+        // Extract domain without port for comparison
+        let clean_domain = domain.split(':').next().unwrap_or(domain);
+
+        // Check if any API key config has this domain in its endpoints list
+        for key_config in &self.api_keys {
+            if key_config.endpoints.contains(&clean_domain.to_string()) {
+                return true;
+            }
+        }
+
+        false
     }
 }
 
@@ -365,6 +394,7 @@ mod tests {
                 fake_key: "sk-fake_fk".to_string(),
                 header_name: "Authorization".to_string(),
                 scan_locations: vec![],
+                endpoints: vec!["api.openai.com".to_string()],
                 created_at: Utc::now(),
             }],
             ..Default::default()
@@ -384,11 +414,69 @@ mod tests {
                 fake_key: "sk-fake_fk".to_string(),
                 header_name: "Authorization".to_string(),
                 scan_locations: vec![],
+                endpoints: vec!["api.openai.com".to_string()],
                 created_at: Utc::now(),
             }],
             ..Default::default()
         };
         let map = config.build_key_map();
         assert_eq!(map.get("sk-fake_fk"), Some(&"sk-real".to_string()));
+    }
+
+    #[test]
+    fn test_needs_mitm_for_domain() {
+        let mut config = AppConfig::default();
+        
+        // Test with no API keys
+        assert!(!config.needs_mitm_for_domain("api.openai.com"));
+        
+        // Add OpenAI key with endpoint
+        config.api_keys.push(ApiKeyConfig {
+            name: "openai-test".to_string(),
+            real_key: "sk-real".to_string(),
+            fake_key: "sk-fake_fk".to_string(),
+            header_name: "Authorization".to_string(),
+            scan_locations: vec![],
+            endpoints: vec!["api.openai.com".to_string()],
+            created_at: Utc::now(),
+        });
+        
+        // Test OpenAI domains
+        assert!(config.needs_mitm_for_domain("api.openai.com"));
+        assert!(config.needs_mitm_for_domain("api.openai.com:443"));
+        
+        // Test non-OpenAI domains
+        assert!(!config.needs_mitm_for_domain("api.github.com"));
+        assert!(!config.needs_mitm_for_domain("googleapis.com"));
+        assert!(!config.needs_mitm_for_domain("example.com"));
+    }
+
+    #[test]
+    fn test_needs_mitm_multiple_endpoints() {
+        let mut config = AppConfig::default();
+        
+        // Add API key with multiple endpoints
+        config.api_keys.push(ApiKeyConfig {
+            name: "multi-endpoint".to_string(),
+            real_key: "sk-real".to_string(),
+            fake_key: "sk-fake_fk".to_string(),
+            header_name: "Authorization".to_string(),
+            scan_locations: vec![],
+            endpoints: vec![
+                "api.openai.com".to_string(),
+                "api.github.com".to_string(),
+                "custom.example.com".to_string(),
+            ],
+            created_at: Utc::now(),
+        });
+        
+        // Test all configured endpoints
+        assert!(config.needs_mitm_for_domain("api.openai.com"));
+        assert!(config.needs_mitm_for_domain("api.github.com"));
+        assert!(config.needs_mitm_for_domain("custom.example.com"));
+        
+        // Test non-configured domains
+        assert!(!config.needs_mitm_for_domain("googleapis.com"));
+        assert!(!config.needs_mitm_for_domain("other.com"));
     }
 }

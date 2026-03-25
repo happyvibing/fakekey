@@ -41,7 +41,8 @@ async fn main() -> Result<()> {
             key,
             template,
             header,
-        } => cmd_add(&name, &key, template.as_deref(), header.as_deref())?,
+            endpoints,
+        } => cmd_add(&name, &key, template.as_deref(), header.as_deref(), endpoints.as_deref())?,
         Commands::List => cmd_list()?,
         Commands::Show { name } => cmd_show(&name)?,
         Commands::Remove { name } => cmd_remove(&name)?,
@@ -170,6 +171,7 @@ async fn cmd_start(port: u16, daemon_mode: bool) -> Result<()> {
         cert_manager,
         allowed_hosts: config.proxy.allowed_hosts.clone(),
         audit_logger,
+        config: Arc::new(config.clone()),
     });
 
     let addr: SocketAddr = format!("127.0.0.1:{}", port).parse()?;
@@ -185,7 +187,7 @@ async fn cmd_start(port: u16, daemon_mode: bool) -> Result<()> {
 }
 
 /// Add a new API key
-fn cmd_add(name: &str, key: &str, template: Option<&str>, header: Option<&str>) -> Result<()> {
+fn cmd_add(name: &str, key: &str, template: Option<&str>, header: Option<&str>, endpoints: Option<&str>) -> Result<()> {
     let mut config = AppConfig::load()?;
 
     // Check if name already exists
@@ -214,12 +216,31 @@ fn cmd_add(name: &str, key: &str, template: Option<&str>, header: Option<&str>) 
         "Authorization".to_string()
     };
 
+    // Determine endpoints
+    let endpoints_list = if let Some(eps) = endpoints {
+        // Parse comma-separated endpoints
+        eps.split(',')
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect()
+    } else if let Some(tpl) = template {
+        // Use template default endpoints
+        if let Some(template_obj) = templates::get_template(tpl) {
+            template_obj.default_endpoints.iter().map(|s| s.to_string()).collect()
+        } else {
+            vec![] // No template, empty endpoints
+        }
+    } else {
+        vec![] // No template and no custom endpoints
+    };
+
     let key_config = ApiKeyConfig {
         name: name.to_string(),
         real_key: key.to_string(),
         fake_key: fake_key.clone(),
         header_name: header_name.clone(),
         scan_locations: vec![ScanLocation::Header(header_name)],
+        endpoints: endpoints_list,
         created_at: chrono::Utc::now(),
     };
 
@@ -611,6 +632,7 @@ async fn cmd_onboard() -> Result<()> {
                 fake_key: fake_key.clone(),
                 header_name: header.to_string(),
                 scan_locations: vec![config::ScanLocation::Header(header.to_string())],
+                endpoints: vec![], // Empty endpoints for custom keys
                 created_at: chrono::Utc::now(),
             };
             
@@ -667,6 +689,7 @@ async fn cmd_onboard() -> Result<()> {
                 fake_key: fake_key.clone(),
                 header_name: template.header_name.to_string(),
                 scan_locations: vec![config::ScanLocation::Header(template.header_name.to_string())],
+                endpoints: template.default_endpoints.iter().map(|s| s.to_string()).collect(),
                 created_at: chrono::Utc::now(),
             };
             
