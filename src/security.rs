@@ -3,6 +3,7 @@ use aes_gcm::{
     Aes256Gcm, Nonce,
 };
 use anyhow::{Context, Result};
+use rcgen::KeyPair;
 use sha2::{Digest, Sha256};
 use std::fs;
 use std::path::Path;
@@ -89,7 +90,77 @@ pub fn mask_sensitive(text: &str, keywords: &[&str]) -> String {
     result
 }
 
-/// Get encryption password from environment or prompt
+/// Derive encryption key from CA private key
+pub fn derive_key_from_ca_key(ca_key_pem: &str) -> Result<[u8; 32]> {
+    let key_pair = KeyPair::from_pem(ca_key_pem)
+        .with_context(|| "Failed to parse CA private key")?;
+    
+    // Use the raw private key bytes to derive encryption key
+    let key_der = key_pair.serialized_der();
+    let mut hasher = Sha256::new();
+    hasher.update(key_der);
+    Ok(hasher.finalize().into())
+}
+
+/// Encrypt data using CA private key-derived key
+pub fn encrypt_data_with_ca_key(data: &[u8], ca_key_pem: &str) -> Result<Vec<u8>> {
+    let key = derive_key_from_ca_key(ca_key_pem)?;
+    let cipher = Aes256Gcm::new(&key.into());
+
+    let mut nonce_bytes = [0u8; NONCE_SIZE];
+    for byte in &mut nonce_bytes {
+        *byte = rand::random();
+    }
+    let nonce = Nonce::from_slice(&nonce_bytes);
+
+    let ciphertext = cipher
+        .encrypt(nonce, data)
+        .map_err(|e| anyhow::anyhow!("Encryption failed: {}", e))?;
+
+    let mut result = nonce_bytes.to_vec();
+    result.extend_from_slice(&ciphertext);
+    Ok(result)
+}
+
+/// Decrypt data using CA private key-derived key
+pub fn decrypt_data_with_ca_key(encrypted: &[u8], ca_key_pem: &str) -> Result<Vec<u8>> {
+    if encrypted.len() < NONCE_SIZE {
+        anyhow::bail!("Invalid encrypted data: too short");
+    }
+
+    let key = derive_key_from_ca_key(ca_key_pem)?;
+    let cipher = Aes256Gcm::new(&key.into());
+
+    let (nonce_bytes, ciphertext) = encrypted.split_at(NONCE_SIZE);
+    let nonce = Nonce::from_slice(nonce_bytes);
+
+    cipher
+        .decrypt(nonce, ciphertext)
+        .map_err(|e| anyhow::anyhow!("Decryption failed: {}", e))
+}
+
+/// Load CA private key and encrypt config file
+pub fn encrypt_config_file_with_ca_key(config_json: &str, config_path: &Path, ca_key_path: &Path) -> Result<()> {
+    let ca_key_pem = fs::read_to_string(ca_key_path)
+        .with_context(|| format!("Failed to read CA key from {}", ca_key_path.display()))?;
+    
+    let encrypted = encrypt_data_with_ca_key(config_json.as_bytes(), &ca_key_pem)?;
+    fs::write(config_path, encrypted)
+        .with_context(|| format!("Failed to write encrypted config to {}", config_path.display()))
+}
+
+/// Load CA private key and decrypt config file
+pub fn decrypt_config_file_with_ca_key(config_path: &Path, ca_key_path: &Path) -> Result<String> {
+    let ca_key_pem = fs::read_to_string(ca_key_path)
+        .with_context(|| format!("Failed to read CA key from {}", ca_key_path.display()))?;
+    
+    let encrypted = fs::read(config_path)
+        .with_context(|| format!("Failed to read encrypted config from {}", config_path.display()))?;
+    let decrypted = decrypt_data_with_ca_key(&encrypted, &ca_key_pem)?;
+    String::from_utf8(decrypted).with_context(|| "Invalid UTF-8 in decrypted config")
+}
+
+/// Get encryption password from environment or prompt (deprecated, kept for compatibility)
 pub fn get_encryption_password() -> Result<String> {
     if let Ok(password) = std::env::var("FAKEKEY_PASSWORD") {
         Ok(password)

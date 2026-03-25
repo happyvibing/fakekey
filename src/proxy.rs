@@ -154,10 +154,37 @@ async fn handle_tunnel(
     let tls_acceptor = TlsAcceptor::from(server_config);
     // Wrap Upgraded in TokioIo so it implements tokio AsyncRead/AsyncWrite
     let tokio_io = TokioIo::new(upgraded);
-    let tls_stream = tls_acceptor
-        .accept(tokio_io)
-        .await
-        .with_context(|| format!("TLS accept failed for {}", domain))?;
+    // Add timeout for TLS handshake with better error handling
+    let tls_accept_result = tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        tls_acceptor.accept(tokio_io)
+    ).await;
+
+    let tls_stream = match tls_accept_result {
+        Ok(Ok(stream)) => stream,
+        Ok(Err(e)) => {
+            let error_str = e.to_string();
+            error!("TLS accept failed for {}: {:?}", domain, e);
+            
+            // Handle different types of TLS errors
+            if error_str.contains("eof") || error_str.contains("UnexpectedEof") {
+                warn!("Client closed TLS connection early for {} - this might be normal behavior", domain);
+                return Err(anyhow::anyhow!("Client closed TLS connection early for {}", domain));
+            } else if error_str.contains("InvalidContentType") {
+                warn!("Client sent non-TLS data to TLS port for {} - possibly HTTP request to HTTPS port", domain);
+                return Err(anyhow::anyhow!("Invalid content type for {} - client may be sending HTTP to HTTPS port", domain));
+            } else if error_str.contains("AlertReceived") {
+                warn!("TLS alert received for {} - client rejected certificate", domain);
+                return Err(anyhow::anyhow!("TLS alert for {} - certificate verification failed", domain));
+            } else {
+                return Err(anyhow::anyhow!("TLS accept failed for {}: {:?}", domain, e));
+            }
+        }
+        Err(_) => {
+            error!("TLS handshake timeout for {}", domain);
+            return Err(anyhow::anyhow!("TLS handshake timeout for {}", domain));
+        }
+    };
 
     // Wrap TLS stream in TokioIo again for hyper's Read/Write traits
     let io = TokioIo::new(tls_stream);

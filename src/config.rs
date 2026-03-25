@@ -11,8 +11,6 @@ use std::path::{Path, PathBuf};
 pub struct AppConfig {
     pub proxy: ProxyConfig,
     pub api_keys: Vec<ApiKeyConfig>,
-    #[serde(default)]
-    pub security: SecurityConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -29,8 +27,8 @@ pub struct ProxyConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ApiKeyConfig {
-    pub service: String,
-    pub real_key: String,
+    pub name: String,
+    pub real_key: String, // Will be encrypted
     pub fake_key: String,
     #[serde(default = "default_header_name")]
     pub header_name: String,
@@ -51,15 +49,9 @@ pub enum ScanLocation {
     JsonBody(String),
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[derive(Default)]
-pub struct SecurityConfig {
-    #[serde(default)]
-    pub encrypt_config: bool,
-}
 
 fn default_port() -> u16 {
-    1157
+    1155
 }
 
 fn default_log_level() -> String {
@@ -104,17 +96,28 @@ impl AppConfig {
             return Ok(Self::default());
         }
         
-        let content = if Self::is_encrypted(&path)? {
-            let password = crate::security::get_encryption_password()
-                .with_context(|| "Failed to get encryption password")?;
-            crate::security::decrypt_config_file(&path, &password)?
-        } else {
-            fs::read_to_string(&path)
-                .with_context(|| format!("Failed to read config file: {}", path.display()))?
-        };
+        let content = fs::read_to_string(&path)
+            .with_context(|| format!("Failed to read config file: {}", path.display()))?;
         
-        let config: AppConfig = serde_yaml::from_str(&content)
+        let mut config: AppConfig = serde_json::from_str(&content)
             .with_context(|| "Failed to parse config file")?;
+        
+        // Decrypt real keys
+        let data_dir = config.data_dir();
+        let ca_key_path = data_dir.join("certs").join("ca").join("key.pem");
+        let ca_key_pem = fs::read_to_string(&ca_key_path)
+            .with_context(|| format!("Failed to read CA key from {}", ca_key_path.display()))?;
+        
+        for key_config in &mut config.api_keys {
+            if !key_config.real_key.is_empty() {
+                let encrypted_key = hex::decode(&key_config.real_key)
+                    .with_context(|| "Failed to decode encrypted real key")?;
+                let decrypted_key = crate::security::decrypt_data_with_ca_key(&encrypted_key, &ca_key_pem)
+                    .with_context(|| "Failed to decrypt real key")?;
+                key_config.real_key = String::from_utf8(decrypted_key)
+                    .with_context(|| "Failed to convert decrypted key to string")?;
+            }
+        }
         
         // Log config load if audit logger is available
         if let Ok(data_dir_env) = std::env::var("FAKEKEY_DATA_DIR") {
@@ -131,22 +134,33 @@ impl AppConfig {
         Ok(config)
     }
 
-    /// Save config to the default config file path
+    /// Save config to the default config file path (encrypting real keys)
     pub fn save(&self) -> Result<()> {
         let path = Self::config_path();
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)?;
         }
-        let content = serde_yaml::to_string(self)?;
         
-        if self.security.encrypt_config {
-            let password = crate::security::get_encryption_password()
-                .with_context(|| "Failed to get encryption password")?;
-            crate::security::encrypt_config_file(&content, &path, &password)?;
-        } else {
-            fs::write(&path, content)
-                .with_context(|| format!("Failed to write config file: {}", path.display()))?;
+        // Create a copy and encrypt real keys
+        let mut config_to_save = self.clone();
+        let data_dir = config_to_save.data_dir();
+        let ca_key_path = data_dir.join("certs").join("ca").join("key.pem");
+        let ca_key_pem = fs::read_to_string(&ca_key_path)
+            .with_context(|| format!("Failed to read CA key from {}", ca_key_path.display()))?;
+        
+        for key_config in &mut config_to_save.api_keys {
+            if !key_config.real_key.is_empty() {
+                let encrypted_key = crate::security::encrypt_data_with_ca_key(
+                    key_config.real_key.as_bytes(),
+                    &ca_key_pem
+                )?;
+                key_config.real_key = hex::encode(encrypted_key);
+            }
         }
+        
+        let content = serde_json::to_string_pretty(&config_to_save)?;
+        fs::write(&path, content)
+            .with_context(|| format!("Failed to write config file: {}", path.display()))?;
         
         // Log config save if audit logger is available
         if let Ok(data_dir_env) = std::env::var("FAKEKEY_DATA_DIR") {
@@ -154,7 +168,7 @@ impl AppConfig {
             if let Ok(logger) = crate::audit::AuditLogger::new(&data_dir_path) {
                 let _ = logger.log(
                     crate::audit::AuditEventType::ConfigSave,
-                    format!("Configuration saved (encrypted: {})", self.security.encrypt_config),
+                    "Configuration saved (real keys encrypted)".to_string(),
                     true,
                 );
             }
@@ -163,12 +177,12 @@ impl AppConfig {
         Ok(())
     }
 
-    /// Return the default config file path: ~/.fakekey/config.yaml
+    /// Return the default config file path: ~/.fakekey/config.json
     pub fn config_path() -> PathBuf {
         dirs::home_dir()
             .unwrap_or_else(|| PathBuf::from("."))
             .join(".fakekey")
-            .join("config.yaml")
+            .join("config.json")
     }
 
     /// Build a mapping from fake_key -> real_key for quick lookup
@@ -179,51 +193,110 @@ impl AppConfig {
             .collect()
     }
 
-    /// Find an API key config by service name
-    pub fn find_by_service(&self, service: &str) -> Option<&ApiKeyConfig> {
-        self.api_keys.iter().find(|k| k.service == service)
+    /// Find an API key config by name
+    pub fn find_by_name(&self, name: &str) -> Option<&ApiKeyConfig> {
+        self.api_keys.iter().find(|k| k.name == name)
     }
 
-    /// Remove an API key config by service name. Returns true if removed.
-    pub fn remove_by_service(&mut self, service: &str) -> bool {
+    /// Remove an API key config by name. Returns true if removed.
+    pub fn remove_by_name(&mut self, name: &str) -> bool {
         let before = self.api_keys.len();
-        self.api_keys.retain(|k| k.service != service);
+        self.api_keys.retain(|k| k.name != name);
         self.api_keys.len() < before
-    }
-
-    /// Check if config file is encrypted (not valid YAML)
-    fn is_encrypted(path: &Path) -> Result<bool> {
-        let content = fs::read_to_string(path)
-            .with_context(|| format!("Failed to read config file: {}", path.display()))?;
-        Ok(serde_yaml::from_str::<AppConfig>(&content).is_err())
     }
 }
 
 /// Generate a fake key from a real key.
-/// Strategy: keep the same length, replace trailing chars with `_fk` suffix.
+/// Strategy: keep the same length, replace some trailing chars with `_fk` pattern.
 pub fn generate_fake_key(real_key: &str) -> String {
-    let suffix = "_fk";
-    if real_key.len() <= suffix.len() {
-        // Key is too short, just append
-        return format!("{}{}", real_key, suffix);
+    let key_len = real_key.len();
+    
+    if key_len < 8 {
+        // For very short keys, just replace last 2 chars with _k
+        let prefix = &real_key[..key_len.saturating_sub(2)];
+        format!("{}_k", prefix)
+    } else if key_len < 12 {
+        // For short keys, replace last 3 chars with _fk
+        let prefix = &real_key[..key_len - 3];
+        format!("{}_fk", prefix)
+    } else {
+        // For normal keys, replace some characters in the middle with _fk_
+        // Keep first 1/3 and last 1/3, replace middle 1/3 with _fk_
+        let first_third = key_len / 3;
+        let last_third = key_len - first_third;
+        let prefix = &real_key[..first_third];
+        let suffix = &real_key[last_third..];
+        
+        // Calculate how many chars we need for the middle part
+        let middle_len = key_len - prefix.len() - suffix.len();
+        let middle_pattern = if middle_len >= 3 {
+            "_fk_".to_string()
+        } else {
+            "_k".to_string()
+        };
+        
+        // Adjust to maintain exact length
+        let mut result = format!("{}{}{}", prefix, middle_pattern, suffix);
+        if result.len() > key_len {
+            // Truncate if too long
+            result.truncate(key_len);
+        } else if result.len() < key_len {
+            // Pad with random chars if too short
+            let mut rng = rand::rng();
+            while result.len() < key_len {
+                let rand_char: char = rng.random_range(b'a'..=b'z') as char;
+                result.push(rand_char);
+            }
+        }
+        result
     }
-
-    // Replace the last 3 characters with _fk
-    let base = &real_key[..real_key.len() - suffix.len()];
-    format!("{}{}", base, suffix)
 }
 
 /// Ensure uniqueness of the fake key among existing keys.
-/// If there is a collision, append random chars before the suffix.
+/// If there is a collision, modify the pattern while maintaining length.
 pub fn generate_unique_fake_key(real_key: &str, existing_fake_keys: &[&str]) -> String {
     let mut fake = generate_fake_key(real_key);
     let mut attempts = 0;
+    let key_len = real_key.len();
+    
     while existing_fake_keys.iter().any(|k| k == &fake) && attempts < 100 {
         let mut rng = rand::rng();
-        let rand_char: char = rng.random_range(b'a'..=b'z') as char;
-        let suffix = format!("{}_fk", rand_char);
-        let base = &real_key[..real_key.len().saturating_sub(suffix.len())];
-        fake = format!("{}{}", base, suffix);
+        
+        // Generate a unique variation while maintaining length
+        if key_len < 8 {
+            // For very short keys, use different single char
+            let rand_char: char = rng.random_range(b'a'..=b'z') as char;
+            let prefix = &real_key[..key_len.saturating_sub(2)];
+            fake = format!("{}_{}", prefix, rand_char);
+        } else if key_len < 12 {
+            // For short keys, use different pattern
+            let rand_char: char = rng.random_range(b'a'..=b'z') as char;
+            let prefix = &real_key[..key_len - 4];
+            fake = format!("{}_{}k", prefix, rand_char);
+        } else {
+            // For normal keys, modify the middle pattern
+            let first_third = key_len / 3;
+            let last_third = key_len - first_third;
+            let prefix = &real_key[..first_third];
+            let suffix = &real_key[last_third..];
+            
+            // Use different pattern with random chars
+            let rand_char1: char = rng.random_range(b'a'..=b'z') as char;
+            let rand_char2: char = rng.random_range(b'a'..=b'z') as char;
+            let middle_pattern = format!("_{}_{}_", rand_char1, rand_char2);
+            
+            let mut result = format!("{}{}{}", prefix, middle_pattern, suffix);
+            if result.len() > key_len {
+                result.truncate(key_len);
+            } else if result.len() < key_len {
+                while result.len() < key_len {
+                    let rand_char: char = rng.random_range(b'a'..=b'z') as char;
+                    result.push(rand_char);
+                }
+            }
+            fake = result;
+        }
+        
         attempts += 1;
     }
     fake
@@ -287,7 +360,7 @@ mod tests {
     fn test_unique_fake_key() {
         let config = AppConfig {
             api_keys: vec![ApiKeyConfig {
-                service: "openai".to_string(),
+                name: "my-openai-key".to_string(),
                 real_key: "sk-real".to_string(),
                 fake_key: "sk-fake_fk".to_string(),
                 header_name: "Authorization".to_string(),
@@ -306,7 +379,7 @@ mod tests {
     fn test_build_key_map() {
         let config = AppConfig {
             api_keys: vec![ApiKeyConfig {
-                service: "openai".to_string(),
+                name: "my-openai-key".to_string(),
                 real_key: "sk-real".to_string(),
                 fake_key: "sk-fake_fk".to_string(),
                 header_name: "Authorization".to_string(),

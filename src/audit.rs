@@ -94,7 +94,7 @@ mod tests {
         logger
             .log(
                 AuditEventType::ProxyStart,
-                "Started proxy on port 1157".to_string(),
+                "Started proxy on port 1155".to_string(),
                 true,
             )
             .unwrap();
@@ -104,7 +104,7 @@ mod tests {
 
         let content = fs::read_to_string(&log_file).unwrap();
         assert!(content.contains("proxy_start"));
-        assert!(content.contains("port 1157"));
+        assert!(content.contains("port 1155"));
     }
 
     #[test]

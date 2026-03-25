@@ -17,7 +17,7 @@ pub enum Commands {
     /// Start the proxy server
     Start {
         /// Port to listen on
-        #[arg(short, long, default_value_t = 1157)]
+        #[arg(short, long, default_value_t = 1155)]
         port: u16,
 
         /// Run as daemon in background
@@ -27,38 +27,38 @@ pub enum Commands {
 
     /// Add an API key
     Add {
-        /// Service name (e.g., openai, github)
+        /// Unique name for this key (e.g., my-openai-key)
         #[arg(short, long)]
-        service: String,
+        name: String,
 
         /// Real API key
         #[arg(short, long)]
         key: String,
 
-        /// Header name for the key
-        #[arg(long, default_value_t = String::from("Authorization"))]
-        header: String,
-
-        /// Use predefined template for the service
+        /// Use template (e.g., openai, anthropic, github)
         #[arg(short, long)]
-        template: bool,
+        template: Option<String>,
+
+        /// Custom header name (default: Authorization)
+        #[arg(long)]
+        header: Option<String>,
     },
 
     /// List all configured API keys
     List,
 
-    /// Show details for a specific service
+    /// Show details for a specific key
     Show {
-        /// Service name
+        /// Key name
         #[arg(short, long)]
-        service: String,
+        name: String,
     },
 
     /// Remove an API key configuration
     Remove {
-        /// Service name
+        /// Key name
         #[arg(short, long)]
-        service: String,
+        name: String,
     },
 
     /// Check proxy status
@@ -83,12 +83,8 @@ pub enum Commands {
     /// List available service templates
     Templates,
 
-    /// Enable or disable config encryption
-    Encrypt {
-        /// Enable encryption
-        #[arg(short, long)]
-        enable: bool,
-    },
+    /// Interactive setup wizard
+    Onboard,
 }
 
 #[derive(Subcommand)]

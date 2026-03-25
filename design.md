@@ -12,7 +12,7 @@ FakeKey 是一个基于 Rust 开发的 CLI 代理程序，用于管理和替换 
 - **密钥映射**: 维护假密钥到真实密钥的映射关系
 
 ### 2. 网络代理
-- **HTTP/HTTPS 代理**: 监听指定端口（默认 1157），代理网络流量
+- **HTTP/HTTPS 代理**: 监听指定端口（默认 1155），代理网络流量
 - **HTTPS 解密**: 使用 MITM（中间人）技术，生成自签名证书解密 HTTPS 流量
 - **流量拦截**: 拦截 HTTP/HTTPS 请求的 Header、URL 参数、请求体中的 API 密钥
 - **密钥替换**: 将假密钥替换为真实密钥后转发到目标服务器
@@ -85,7 +85,7 @@ enum ScanLocation {
 }
 
 struct ProxyConfig {
-    listen_port: u16,       // 默认 1157
+    listen_port: u16,       // 默认 1155
     allowed_hosts: Vec<String>,
     log_level: LogLevel,
     encryption_enabled: bool,
@@ -139,7 +139,7 @@ struct ProxyConfig {
 fakekey init
 
 # 启动代理服务
-fakekey start --port 1157 --daemon
+fakekey start --port 1155 --daemon
 
 # 添加 API 密钥
 fakekey add --service openai --key "sk-proj-xxxxx"
@@ -171,7 +171,7 @@ fakekey stop
 ```yaml
 # ~/.fakekey/config.yaml
 proxy:
-  port: 1157
+  port: 1155
   log_level: info
   data_dir: "~/.fakekey"
   allowed_hosts: ["api.openai.com", "googleapis.com", "api.github.com"]
@@ -313,7 +313,7 @@ fakekey start --daemon
 
 # 3. 在 IDE/应用中配置
 # - API Key: sk-proj-real-key-123456_fk
-# - Proxy: http://127.0.0.1:1157
+# - Proxy: http://127.0.0.1:1155
 
 # 4. 信任 CA 证书（仅首次）
 # macOS: sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain ~/.fakekey/certs/ca.crt

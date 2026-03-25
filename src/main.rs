@@ -17,10 +17,14 @@ use std::sync::Arc;
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    rustls::crypto::ring::default_provider()
+        .install_default()
+        .expect("Failed to install rustls crypto provider");
+    
     let cli = Cli::parse();
 
     // Initialize tracing for non-start commands
-    if !matches!(cli.command, Commands::Start { .. }) {
+    if !matches!(cli.command, Commands::Start { .. } | Commands::Onboard) {
         tracing_subscriber::fmt()
             .with_env_filter(
                 tracing_subscriber::EnvFilter::try_from_default_env()
@@ -33,14 +37,14 @@ async fn main() -> Result<()> {
         Commands::Init => cmd_init()?,
         Commands::Start { port, daemon } => cmd_start(port, daemon).await?,
         Commands::Add {
-            service,
+            name,
             key,
-            header,
             template,
-        } => cmd_add(&service, &key, &header, template)?,
+            header,
+        } => cmd_add(&name, &key, template.as_deref(), header.as_deref())?,
         Commands::List => cmd_list()?,
-        Commands::Show { service } => cmd_show(&service)?,
-        Commands::Remove { service } => cmd_remove(&service)?,
+        Commands::Show { name } => cmd_show(&name)?,
+        Commands::Remove { name } => cmd_remove(&name)?,
         Commands::Status => cmd_status()?,
         Commands::Logs { follow } => cmd_logs(follow)?,
         Commands::Cert { action } => match action {
@@ -48,7 +52,7 @@ async fn main() -> Result<()> {
         },
         Commands::Stop => cmd_stop()?,
         Commands::Templates => cmd_templates()?,
-        Commands::Encrypt { enable } => cmd_encrypt(enable)?,
+        Commands::Onboard => cmd_onboard().await?,
     }
 
     Ok(())
@@ -75,17 +79,18 @@ fn cmd_init() -> Result<()> {
     println!("Initialized FakeKey at {}", data_dir.display());
     println!("\nDirectory structure:");
     println!("  {}/", data_dir.display());
-    println!("  ├── config.yaml");
+    println!("  ├── config.json (real keys encrypted)");
     println!("  ├── certs/");
     println!("  │   ├── ca/");
     println!("  │   │   ├── cert.pem");
-    println!("  │   │   └── key.pem");
+    println!("  │   │   └── key.pem (used for key encryption)");
     println!("  │   ├── cache/");
     println!("  │   └── ca.crt");
     println!("  ├── logs/");
     println!("  └── pid");
+    println!("\nReal API keys are automatically encrypted using the CA private key.");
     println!("\nNext steps:");
-    println!("  1. Add an API key:  fakekey add --service openai --key \"sk-...\"");
+    println!("  1. Add an API key:  fakekey add --name my-openai-key --key \"sk-...\" --template openai");
     println!("  2. Start the proxy: fakekey start");
     println!("  3. Trust the CA:    fakekey cert export");
 
@@ -180,47 +185,42 @@ async fn cmd_start(port: u16, daemon_mode: bool) -> Result<()> {
 }
 
 /// Add a new API key
-fn cmd_add(service: &str, key: &str, header: &str, use_template: bool) -> Result<()> {
+fn cmd_add(name: &str, key: &str, template: Option<&str>, header: Option<&str>) -> Result<()> {
     let mut config = AppConfig::load()?;
 
-    // Check if service already exists
-    if config.find_by_service(service).is_some() {
+    // Check if name already exists
+    if config.find_by_name(name).is_some() {
         anyhow::bail!(
-            "Service '{}' already exists. Remove it first with `fakekey remove --service {}`",
-            service,
-            service
+            "Key name '{}' already exists. Remove it first with `fakekey remove --name {}`",
+            name,
+            name
         );
     }
 
     let existing_fake_keys: Vec<_> = config.api_keys.iter().map(|k| k.fake_key.as_str()).collect();
     let fake_key = generate_unique_fake_key(key, &existing_fake_keys);
 
-    let key_config = if use_template {
-        if let Some(template) = templates::get_template(service) {
-            println!("Using template: {}", template.description);
-            let mut config = template.to_api_key_config(key.to_string(), fake_key.clone());
-            config.scan_locations = vec![ScanLocation::Header(template.header_name.to_string())];
-            config
+    // Determine header name
+    let header_name = if let Some(tpl) = template {
+        if let Some(template_obj) = templates::get_template(tpl) {
+            println!("Using template: {}", template_obj.description);
+            template_obj.header_name.to_string()
         } else {
-            println!("No template found for '{}', using default configuration", service);
-            ApiKeyConfig {
-                service: service.to_string(),
-                real_key: key.to_string(),
-                fake_key: fake_key.clone(),
-                header_name: header.to_string(),
-                scan_locations: vec![ScanLocation::Header(header.to_string())],
-                created_at: chrono::Utc::now(),
-            }
+            anyhow::bail!("Template '{}' not found. Run `fakekey templates` to see available templates.", tpl);
         }
+    } else if let Some(h) = header {
+        h.to_string()
     } else {
-        ApiKeyConfig {
-            service: service.to_string(),
-            real_key: key.to_string(),
-            fake_key: fake_key.clone(),
-            header_name: header.to_string(),
-            scan_locations: vec![ScanLocation::Header(header.to_string())],
-            created_at: chrono::Utc::now(),
-        }
+        "Authorization".to_string()
+    };
+
+    let key_config = ApiKeyConfig {
+        name: name.to_string(),
+        real_key: key.to_string(),
+        fake_key: fake_key.clone(),
+        header_name: header_name.clone(),
+        scan_locations: vec![ScanLocation::Header(header_name)],
+        created_at: chrono::Utc::now(),
     };
 
     config.api_keys.push(key_config);
@@ -232,15 +232,16 @@ fn cmd_add(service: &str, key: &str, header: &str, use_template: bool) -> Result
         if let Ok(logger) = audit::AuditLogger::new(&data_dir_path) {
             let _ = logger.log(
                 audit::AuditEventType::KeyAdd,
-                format!("Added key for service: {}", service),
+                format!("Added key: {}", name),
                 true,
             );
         }
     }
 
-    println!("Added API key for service: {}", service);
+    println!("Added API key: {}", name);
     println!("Fake key: {}", fake_key);
     println!("\nUse this fake key in your applications instead of the real key.");
+    println!("\nReal key is automatically encrypted using the CA private key.");
 
     Ok(())
 }
@@ -251,30 +252,30 @@ fn cmd_list() -> Result<()> {
 
     if config.api_keys.is_empty() {
         println!("No API keys configured.");
-        println!("Add one with: fakekey add --service <name> --key <key>");
+        println!("Add one with: fakekey add --name <name> --key <key> --template <template>");
         return Ok(());
     }
 
-    println!("{:<15} {:<40} {:<20}", "SERVICE", "FAKE KEY", "HEADER");
-    println!("{}", "-".repeat(75));
+    println!("{:<20} {:<40} {:<20}", "NAME", "FAKE KEY", "HEADER");
+    println!("{}", "-".repeat(80));
 
     for key in &config.api_keys {
         println!(
-            "{:<15} {:<40} {:<20}",
-            key.service, key.fake_key, key.header_name
+            "{:<20} {:<40} {:<20}",
+            key.name, key.fake_key, key.header_name
         );
     }
 
     Ok(())
 }
 
-/// Show details for a specific service
-fn cmd_show(service: &str) -> Result<()> {
+/// Show details for a specific key
+fn cmd_show(name: &str) -> Result<()> {
     let config = AppConfig::load()?;
 
-    match config.find_by_service(service) {
+    match config.find_by_name(name) {
         Some(key) => {
-            println!("Service:    {}", key.service);
+            println!("Name:       {}", key.name);
             println!("Fake Key:   {}", key.fake_key);
             println!("Real Key:   {}", key_handler::mask_key(&key.real_key));
             println!("Header:     {}", key.header_name);
@@ -289,7 +290,7 @@ fn cmd_show(service: &str) -> Result<()> {
             }
         }
         None => {
-            println!("Service '{}' not found.", service);
+            println!("Key '{}' not found.", name);
         }
     }
 
@@ -297,14 +298,14 @@ fn cmd_show(service: &str) -> Result<()> {
 }
 
 /// Remove an API key configuration
-fn cmd_remove(service: &str) -> Result<()> {
+fn cmd_remove(name: &str) -> Result<()> {
     let mut config = AppConfig::load()?;
 
-    if config.remove_by_service(service) {
+    if config.remove_by_name(name) {
         config.save()?;
-        println!("Removed API key for service: {}", service);
+        println!("Removed API key: {}", name);
     } else {
-        println!("Service '{}' not found.", service);
+        println!("Key '{}' not found.", name);
     }
 
     Ok(())
@@ -462,54 +463,309 @@ fn is_process_running(pid: u32) -> bool {
 
 /// List available service templates
 fn cmd_templates() -> Result<()> {
-    println!("{:<15} {:<20} {:<50}", "SERVICE", "KEY PATTERN", "DESCRIPTION");
-    println!("{}", "-".repeat(85));
+    println!("{:<15} {:<50}", "SERVICE", "DESCRIPTION");
+    println!("{}", "-".repeat(65));
 
     for template in templates::list_templates() {
         println!(
-            "{:<15} {:<20} {:<50}",
-            template.name, template.key_pattern, template.description
+            "{:<15} {:<50}",
+            template.name, template.description
         );
     }
 
-    println!("\nUse --template flag when adding a key:");
-    println!("  fakekey add --service openai --key \"sk-...\" --template");
+    println!("\nUsage:");
+    println!("  fakekey add --name my-openai-key --key \"sk-...\" --template openai");
 
     Ok(())
 }
 
-/// Enable or disable config encryption
-fn cmd_encrypt(enable: bool) -> Result<()> {
-    let mut config = AppConfig::load()?;
+/// Interactive setup wizard
+async fn cmd_onboard() -> Result<()> {
+    println!("🚀 Welcome to FakeKey Interactive Setup!");
+    println!("This wizard will help you set up everything in one go.");
+    println!();
 
-    if enable {
-        if config.security.encrypt_config {
-            println!("Config encryption is already enabled.");
-            return Ok(());
-        }
-
-        println!("Enabling config encryption...");
-        println!("Set FAKEKEY_PASSWORD environment variable for encryption/decryption.");
-
-        config.security.encrypt_config = true;
-        config.save()?;
-
-        println!("Config encryption enabled.");
-        println!("The config file will be encrypted on the next save.");
+    // Step 1: Check if already initialized
+    let config = AppConfig::load()?;
+    let data_dir = config.data_dir();
+    let is_initialized = data_dir.exists() && data_dir.join("certs/ca/cert.pem").exists();
+    
+    if is_initialized {
+        println!("✅ FakeKey is already initialized at {}", data_dir.display());
+        println!("   You can continue to add keys or start the proxy.");
+        println!();
     } else {
-        if !config.security.encrypt_config {
-            println!("Config encryption is already disabled.");
-            return Ok(());
-        }
-
-        println!("Disabling config encryption...");
-
-        config.security.encrypt_config = false;
-        config.save()?;
-
-        println!("Config encryption disabled.");
-        println!("The config file is now saved in plain text.");
+        println!("📁 Step 1: Initializing FakeKey...");
+        cmd_init()?;
+        println!("✅ Initialization complete!");
+        println!();
     }
 
+    // Step 2: Trust CA certificate
+    println!("🔐 Step 2: Certificate Setup");
+    println!("   FakeKey needs to generate a CA certificate to intercept HTTPS traffic.");
+    println!("   You need to trust this certificate on your system.");
+    println!();
+    
+    println!("📍 CA certificate location: {}/certs/ca.crt", data_dir.display());
+    println!();
+    
+    println!("🍎 macOS (run this in a separate terminal):");
+    println!("   sudo security add-trusted-cert -d -r trustRoot \\");
+    println!("     -k /Library/Keychains/System.keychain {}/certs/ca.crt", data_dir.display());
+    println!();
+    
+    println!("🐧 Linux (run this in a separate terminal):");
+    println!("   sudo cp {}/certs/ca.crt /usr/local/share/ca-certificates/fakekey.crt", data_dir.display());
+    println!("   sudo update-ca-certificates");
+    println!();
+    
+    println!("🪟 Windows:");
+    println!("   1. Run: certmgr.msc");
+    println!("   2. Go to Trusted Root Certification Authorities → Certificates");
+    println!("   3. Right-click → All Tasks → Import");
+    println!("   4. Select: {}/certs/ca.crt", data_dir.display());
+    println!();
+    
+    print!("Have you trusted the CA certificate? (y/N): ");
+    use std::io;
+    use std::io::Write;
+    io::stdout().flush()?;
+    let mut input = String::new();
+    io::stdin().read_line(&mut input)?;
+    
+    if !input.trim().to_lowercase().starts_with('y') {
+        println!("⚠️  Please trust the CA certificate before continuing.");
+        println!("   HTTPS requests will fail without a trusted certificate.");
+        println!();
+    } else {
+        println!("✅ Certificate trusted!");
+        println!();
+    }
+
+    // Step 3: Add API keys
+    println!("🔑 Step 3: Add API Keys");
+    println!("   Let's add your first API key.");
+    println!();
+    
+    loop {
+        println!("Available templates:");
+        for template in templates::list_templates() {
+            println!("  - {}: {}", template.name, template.description);
+        }
+        println!();
+        
+        print!("Enter template name (or 'custom' for custom header, or 'done' to finish): ");
+        io::stdout().flush()?;
+        let mut template_input = String::new();
+        io::stdin().read_line(&mut template_input)?;
+        let template_input = template_input.trim();
+        
+        if template_input.to_lowercase() == "done" {
+            break;
+        }
+        
+        if template_input.to_lowercase() == "custom" {
+            print!("Enter key name: ");
+            io::stdout().flush()?;
+            let mut name = String::new();
+            io::stdin().read_line(&mut name)?;
+            let name = name.trim();
+            
+            if name.is_empty() {
+                println!("❌ Key name cannot be empty!");
+                continue;
+            }
+            
+            print!("Enter real API key: ");
+            io::stdout().flush()?;
+            let mut key = String::new();
+            io::stdin().read_line(&mut key)?;
+            let key = key.trim();
+            
+            if key.is_empty() {
+                println!("❌ API key cannot be empty!");
+                continue;
+            }
+            
+            print!("Enter header name (default: Authorization): ");
+            io::stdout().flush()?;
+            let mut header = String::new();
+            io::stdin().read_line(&mut header)?;
+            let header = header.trim();
+            let header = if header.is_empty() { "Authorization" } else { header };
+            
+            // Add custom key
+            let mut config = AppConfig::load()?;
+            if config.find_by_name(name).is_some() {
+                println!("❌ Key name '{}' already exists!", name);
+                continue;
+            }
+            
+            let existing_fake_keys: Vec<_> = config.api_keys.iter().map(|k| k.fake_key.as_str()).collect();
+            let fake_key = config::generate_unique_fake_key(key, &existing_fake_keys);
+            
+            let key_config = config::ApiKeyConfig {
+                name: name.to_string(),
+                real_key: key.to_string(),
+                fake_key: fake_key.clone(),
+                header_name: header.to_string(),
+                scan_locations: vec![config::ScanLocation::Header(header.to_string())],
+                created_at: chrono::Utc::now(),
+            };
+            
+            config.api_keys.push(key_config);
+            config.save()?;
+            
+            println!("✅ Added key: {}", name);
+            println!("   Fake key: {}", fake_key);
+            println!();
+        } else {
+            let template = match templates::get_template(template_input) {
+                Some(t) => t,
+                None => {
+                    println!("❌ Unknown template: {}", template_input);
+                    continue;
+                }
+            };
+            
+            print!("Enter key name: ");
+            io::stdout().flush()?;
+            let mut name = String::new();
+            io::stdin().read_line(&mut name)?;
+            let name = name.trim();
+            
+            if name.is_empty() {
+                println!("❌ Key name cannot be empty!");
+                continue;
+            }
+            
+            print!("Enter real API key: ");
+            io::stdout().flush()?;
+            let mut key = String::new();
+            io::stdin().read_line(&mut key)?;
+            let key = key.trim();
+            
+            if key.is_empty() {
+                println!("❌ API key cannot be empty!");
+                continue;
+            }
+            
+            // Add templated key
+            let mut config = AppConfig::load()?;
+            if config.find_by_name(name).is_some() {
+                println!("❌ Key name '{}' already exists!", name);
+                continue;
+            }
+            
+            let existing_fake_keys: Vec<_> = config.api_keys.iter().map(|k| k.fake_key.as_str()).collect();
+            let fake_key = config::generate_unique_fake_key(key, &existing_fake_keys);
+            
+            let key_config = config::ApiKeyConfig {
+                name: name.to_string(),
+                real_key: key.to_string(),
+                fake_key: fake_key.clone(),
+                header_name: template.header_name.to_string(),
+                scan_locations: vec![config::ScanLocation::Header(template.header_name.to_string())],
+                created_at: chrono::Utc::now(),
+            };
+            
+            config.api_keys.push(key_config);
+            config.save()?;
+            
+            println!("✅ Added key: {} (using {} template)", name, template.name);
+            println!("   Fake key: {}", fake_key);
+            println!();
+        }
+    }
+
+    // Step 4: Show configuration summary
+    let config = AppConfig::load()?;
+    if !config.api_keys.is_empty() {
+        println!("📋 Configuration Summary:");
+        println!("   Data directory: {}", data_dir.display());
+        println!("   Config file: {}/config.json", data_dir.display());
+        println!("   CA certificate: {}/certs/ca.crt", data_dir.display());
+        println!();
+        println!("   Configured keys:");
+        for key in &config.api_keys {
+            println!("   - {} (fake: {})", key.name, key.fake_key);
+        }
+        println!();
+    }
+
+    // Step 5: Start proxy
+    println!("🚀 Step 4: Start Proxy");
+    println!("   Ready to start the proxy server!");
+    println!();
+    
+    // Check if proxy is already running
+    let data_dir = config.data_dir();
+    let pid_file = data_dir.join("pid");
+    let mut is_running = false;
+    
+    if pid_file.exists() {
+        if let Ok(pid_str) = std::fs::read_to_string(&pid_file) {
+            if let Ok(pid) = pid_str.trim().parse::<u32>() {
+                if is_process_running(pid) {
+                    is_running = true;
+                    println!("⚠️  Proxy is already running (PID: {})", pid);
+                    println!("   Listen port:  {}", config.proxy.port);
+                }
+            }
+        }
+    }
+    
+    if is_running {
+        print!("Restart proxy? (Y/n): ");
+        io::stdout().flush()?;
+        let mut restart_input = String::new();
+        io::stdin().read_line(&mut restart_input)?;
+        
+        if restart_input.trim().to_lowercase() != "n" {
+            println!("🔄 Restarting proxy...");
+            cmd_stop()?;
+            // Give it a moment to stop
+            std::thread::sleep(std::time::Duration::from_millis(500));
+            println!("🎉 Starting proxy in background...");
+            println!("   Proxy will run on port {}", config.proxy.port);
+            println!("   Use 'fakekey stop' to stop the proxy.");
+            println!();
+            
+            // Start proxy in background (daemon mode)
+            cmd_start(config.proxy.port, true).await?;
+        } else {
+            println!("💡 Proxy continues running. You can restart it later with:");
+            println!("   fakekey stop && fakekey start");
+            println!("   fakekey restart  # (if implemented)");
+        }
+    } else {
+        print!("Start proxy now? (Y/n): ");
+        io::stdout().flush()?;
+        let mut start_input = String::new();
+        io::stdin().read_line(&mut start_input)?;
+        
+        if start_input.trim().to_lowercase() != "n" {
+            println!("🎉 Starting proxy in background...");
+            println!("   Proxy will run on port {}", config.proxy.port);
+            println!("   Use 'fakekey stop' to stop the proxy.");
+            println!();
+            
+            // Start proxy in background (daemon mode)
+            cmd_start(config.proxy.port, true).await?;
+        } else {
+            println!("💡 You can start the proxy later with:");
+            println!("   fakekey start --daemon");
+            println!("   fakekey start  # foreground mode");
+        }
+    }
+
+    println!();
+    println!("🎊 Setup complete! Your API keys are now protected with FakeKey.");
+    println!("   Use fake keys in your applications instead of real keys.");
+    println!();
+    println!("📚 Need help? Check the documentation or run: fakekey --help");
+
     Ok(())
 }
+

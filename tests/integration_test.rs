@@ -38,7 +38,7 @@ fn test_config_management() {
     // Create a test config
     let mut config = AppConfig {
         proxy: ProxyConfig {
-            port: 1157,
+            port: 1155,
             log_level: "info".to_string(),
             data_dir: temp_dir.path().to_string_lossy().to_string(),
             allowed_hosts: vec!["api.openai.com".to_string()],
