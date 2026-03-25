@@ -347,10 +347,20 @@ fn cmd_status() -> Result<()> {
 
         // Check if process is running
         if is_process_running(pid) {
-            println!("Proxy status: RUNNING (PID: {})", pid);
-            println!("Listen port:  {}", config.proxy.port);
-            println!("API keys:     {} configured", config.api_keys.len());
-            return Ok(());
+            // Additional check: verify the port is actually listening
+            if is_port_listening(config.proxy.port) {
+                println!("Proxy status: RUNNING (PID: {})", pid);
+                println!("Listen port:  {}", config.proxy.port);
+                println!("API keys:     {} configured", config.api_keys.len());
+                return Ok(());
+            } else {
+                println!("Proxy status: PROCESS RUNNING BUT NOT LISTENING");
+                println!("PID:          {}", pid);
+                println!("Expected port: {}", config.proxy.port);
+                println!("The process may have failed to bind to the port.");
+                println!("Try: fakekey stop && fakekey start");
+                return Ok(());
+            }
         }
     }
 
@@ -481,6 +491,26 @@ fn is_process_running(pid: u32) -> bool {
     #[cfg(not(unix))]
     {
         // TODO: Implement process check on Windows
+        false
+    }
+}
+
+/// Check if a port is being listened on
+fn is_port_listening(port: u16) -> bool {
+    #[cfg(unix)]
+    {
+        use std::process::Command;
+        Command::new("lsof")
+            .args(["-i", &format!(":{}", port)])
+            .output()
+            .map(|output| output.status.success())
+            .unwrap_or(false)
+    }
+
+    #[cfg(not(unix))]
+    {
+        // TODO: Implement port check on Windows
+        // Could use netstat or other platform-specific tools
         false
     }
 }
