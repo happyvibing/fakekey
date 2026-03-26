@@ -19,12 +19,6 @@ pub struct ProxyConfig {
     pub port: u16,
     #[serde(default = "default_log_level")]
     pub log_level: String,
-    #[serde(default = "default_data_dir")]
-    pub data_dir: String,
-    #[serde(default)]
-    pub allowed_hosts: Vec<String>,
-    #[serde(default = "default_domain_filtering")]
-    pub enable_domain_filtering: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -62,20 +56,8 @@ fn default_log_level() -> String {
     "info".to_string()
 }
 
-fn default_data_dir() -> String {
-    dirs::home_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join(".fakekey")
-        .to_string_lossy()
-        .into_owned()
-}
-
 fn default_header_name() -> String {
     "Authorization".to_string()
-}
-
-fn default_domain_filtering() -> bool {
-    true // Enable domain filtering by default for better performance
 }
 
 impl Default for ProxyConfig {
@@ -83,9 +65,6 @@ impl Default for ProxyConfig {
         Self {
             port: default_port(),
             log_level: default_log_level(),
-            data_dir: default_data_dir(),
-            allowed_hosts: Vec::new(),
-            enable_domain_filtering: default_domain_filtering(),
         }
     }
 }
@@ -93,9 +72,11 @@ impl Default for ProxyConfig {
 
 
 impl AppConfig {
-    /// Return the resolved data directory path (expanding ~)
+    /// Return the data directory path (always ~/.fakekey)
     pub fn data_dir(&self) -> PathBuf {
-        expand_tilde(&self.proxy.data_dir)
+        dirs::home_dir()
+            .unwrap_or_else(|| PathBuf::from("."))
+            .join(".fakekey")
     }
 
     /// Load config from the default config file path
@@ -450,7 +431,7 @@ mod tests {
         // Add OpenAI key with endpoint
         config.api_keys.push(ApiKeyConfig {
             name: "openai-test".to_string(),
-            real_key: "sk-real".to_string(),
+            encrypted_key: "sk-real".to_string(),
             fake_key: "sk-fake_fk".to_string(),
             header_name: "Authorization".to_string(),
             scan_locations: vec![],
@@ -475,7 +456,7 @@ mod tests {
         // Add API key with multiple endpoints
         config.api_keys.push(ApiKeyConfig {
             name: "multi-endpoint".to_string(),
-            real_key: "sk-real".to_string(),
+            encrypted_key: "sk-real".to_string(),
             fake_key: "sk-fake_fk".to_string(),
             header_name: "Authorization".to_string(),
             scan_locations: vec![],

@@ -179,7 +179,6 @@ async fn cmd_start(port: u16, daemon_mode: bool) -> Result<()> {
     let state = Arc::new(proxy::ProxyState {
         key_map,
         cert_manager,
-        allowed_hosts: config.proxy.allowed_hosts.clone(),
         audit_logger,
         config: Arc::new(config.clone()),
     });
