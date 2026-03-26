@@ -2,9 +2,8 @@ use aes_gcm::{
     aead::{Aead, KeyInit},
     Aes256Gcm, Nonce,
 };
-use anyhow::{Context, Result};
-use rcgen::KeyPair;
-use sha2::{Digest, Sha256};
+use anyhow::Result;
+use crate::keychain;
 
 const NONCE_SIZE: usize = 12;
 
@@ -29,21 +28,9 @@ pub fn mask_sensitive(text: &str, keywords: &[&str]) -> String {
     result
 }
 
-/// Derive encryption key from CA private key
-pub fn derive_key_from_ca_key(ca_key_pem: &str) -> Result<[u8; 32]> {
-    let key_pair = KeyPair::from_pem(ca_key_pem)
-        .with_context(|| "Failed to parse CA private key")?;
-    
-    // Use the raw private key bytes to derive encryption key
-    let key_der = key_pair.serialized_der();
-    let mut hasher = Sha256::new();
-    hasher.update(key_der);
-    Ok(hasher.finalize().into())
-}
-
-/// Encrypt data using CA private key-derived key
-pub fn encrypt_data_with_ca_key(data: &[u8], ca_key_pem: &str) -> Result<Vec<u8>> {
-    let key = derive_key_from_ca_key(ca_key_pem)?;
+/// Encrypt data using keychain-stored encryption key
+pub fn encrypt_data(data: &[u8]) -> Result<Vec<u8>> {
+    let key = keychain::get_or_create_encryption_key()?;
     let cipher = Aes256Gcm::new(&key.into());
 
     let mut nonce_bytes = [0u8; NONCE_SIZE];
@@ -61,13 +48,13 @@ pub fn encrypt_data_with_ca_key(data: &[u8], ca_key_pem: &str) -> Result<Vec<u8>
     Ok(result)
 }
 
-/// Decrypt data using CA private key-derived key
-pub fn decrypt_data_with_ca_key(encrypted: &[u8], ca_key_pem: &str) -> Result<Vec<u8>> {
+/// Decrypt data using keychain-stored encryption key
+pub fn decrypt_data(encrypted: &[u8]) -> Result<Vec<u8>> {
     if encrypted.len() < NONCE_SIZE {
         anyhow::bail!("Invalid encrypted data: too short");
     }
 
-    let key = derive_key_from_ca_key(ca_key_pem)?;
+    let key = keychain::get_or_create_encryption_key()?;
     let cipher = Aes256Gcm::new(&key.into());
 
     let (nonce_bytes, ciphertext) = encrypted.split_at(NONCE_SIZE);

@@ -4,6 +4,7 @@ mod cli;
 mod config;
 mod daemon;
 mod key_handler;
+mod keychain;
 mod proxy;
 mod security;
 mod templates;
@@ -69,6 +70,11 @@ fn cmd_init() -> Result<()> {
 
     init_data_dir(&data_dir)?;
 
+    // Initialize keychain encryption key
+    fakekey::keychain::get_or_create_encryption_key()
+        .with_context(|| "Failed to initialize encryption key in system keychain")?;
+    println!("✓ Encryption key stored in system keychain");
+
     // Generate CA certificate
     let _cert_manager = cert::CertManager::new(&data_dir)
         .with_context(|| "Failed to initialize CA certificate")?;
@@ -87,12 +93,13 @@ fn cmd_init() -> Result<()> {
     println!("  ├── certs/");
     println!("  │   ├── ca/");
     println!("  │   │   ├── cert.pem");
-    println!("  │   │   └── key.pem (used for key encryption)");
+    println!("  │   │   └── key.pem");
     println!("  │   ├── cache/");
     println!("  │   └── ca.crt");
     println!("  ├── logs/");
     println!("  └── pid");
-    println!("\nReal API keys are automatically encrypted using the CA private key.");
+    println!("\n🔐 Real API keys are automatically encrypted using a key stored in system keychain.");
+    println!("   Only this application can access the encryption key.");
     println!("\nNext steps:");
     println!("  1. Add an API key:  fakekey add --name my-openai-key --key \"sk-...\" --template openai");
     println!("  2. Start the proxy: fakekey start");

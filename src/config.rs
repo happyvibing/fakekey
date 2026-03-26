@@ -111,21 +111,42 @@ impl AppConfig {
         let mut config: AppConfig = serde_json::from_str(&content)
             .with_context(|| "Failed to parse config file")?;
         
-        // Decrypt real keys
-        let data_dir = config.data_dir();
-        let ca_key_path = data_dir.join("certs").join("ca").join("key.pem");
-        let ca_key_pem = fs::read_to_string(&ca_key_path)
-            .with_context(|| format!("Failed to read CA key from {}", ca_key_path.display()))?;
+        // Decrypt real keys using keychain, filter out keys that fail to decrypt
+        let mut valid_keys = Vec::new();
+        let mut skipped_count = 0;
         
-        for key_config in &mut config.api_keys {
+        for mut key_config in config.api_keys {
             if !key_config.real_key.is_empty() {
-                let encrypted_key = hex::decode(&key_config.real_key)
-                    .with_context(|| "Failed to decode encrypted real key")?;
-                let decrypted_key = crate::security::decrypt_data_with_ca_key(&encrypted_key, &ca_key_pem)
-                    .with_context(|| "Failed to decrypt real key")?;
-                key_config.real_key = String::from_utf8(decrypted_key)
-                    .with_context(|| "Failed to convert decrypted key to string")?;
+                match hex::decode(&key_config.real_key)
+                    .with_context(|| "Failed to decode encrypted real key")
+                    .and_then(|encrypted_key| {
+                        crate::security::decrypt_data(&encrypted_key)
+                            .with_context(|| "Failed to decrypt real key")
+                    })
+                    .and_then(|decrypted_key| {
+                        String::from_utf8(decrypted_key)
+                            .with_context(|| "Failed to convert decrypted key to string")
+                    })
+                {
+                    Ok(decrypted) => {
+                        key_config.real_key = decrypted;
+                        valid_keys.push(key_config);
+                    }
+                    Err(_) => {
+                        eprintln!("⚠️  Warning: Skipping key '{}' - decryption failed (encryption key may have changed)", key_config.name);
+                        skipped_count += 1;
+                    }
+                }
+            } else {
+                valid_keys.push(key_config);
             }
+        }
+        
+        config.api_keys = valid_keys;
+        
+        if skipped_count > 0 {
+            eprintln!("⚠️  {} key(s) were skipped due to decryption failures.", skipped_count);
+            eprintln!("   Please re-add them using 'fakekey add' command.");
         }
         
         // Log config load if audit logger is available
@@ -150,18 +171,13 @@ impl AppConfig {
             fs::create_dir_all(parent)?;
         }
         
-        // Create a copy and encrypt real keys
+        // Create a copy and encrypt real keys using keychain
         let mut config_to_save = self.clone();
-        let data_dir = config_to_save.data_dir();
-        let ca_key_path = data_dir.join("certs").join("ca").join("key.pem");
-        let ca_key_pem = fs::read_to_string(&ca_key_path)
-            .with_context(|| format!("Failed to read CA key from {}", ca_key_path.display()))?;
         
         for key_config in &mut config_to_save.api_keys {
             if !key_config.real_key.is_empty() {
-                let encrypted_key = crate::security::encrypt_data_with_ca_key(
-                    key_config.real_key.as_bytes(),
-                    &ca_key_pem
+                let encrypted_key = crate::security::encrypt_data(
+                    key_config.real_key.as_bytes()
                 )?;
                 key_config.real_key = hex::encode(encrypted_key);
             }

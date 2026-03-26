@@ -38,13 +38,13 @@ brew install happyvibing/tap/fakekey
 cargo install fakekey
 ```
 
-#### Build from Source
+#### Install from Source
 
 ```bash
 git clone https://github.com/happyvibing/fakekey.git
 cd fakekey
 cargo build --release
-# Binary at: target/release/fakekey
+cargo install --path .
 ```
 
 #### Download Pre-built Binary
