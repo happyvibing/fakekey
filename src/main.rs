@@ -246,7 +246,7 @@ fn cmd_add(name: &str, key: &str, template: Option<&str>, header: Option<&str>, 
 
     let key_config = ApiKeyConfig {
         name: name.to_string(),
-        real_key: key.to_string(),
+        encrypted_key: key.to_string(),
         fake_key: fake_key.clone(),
         header_name: header_name.clone(),
         scan_locations: vec![ScanLocation::Header(header_name)],
@@ -308,7 +308,7 @@ fn cmd_show(name: &str) -> Result<()> {
         Some(key) => {
             println!("Name:       {}", key.name);
             println!("Fake Key:   {}", key.fake_key);
-            println!("Real Key:   {}", key_handler::mask_key(&key.real_key));
+            println!("Real Key:   {}", key_handler::mask_key(&key.encrypted_key));
             println!("Header:     {}", key.header_name);
             println!("Created:    {}", key.created_at);
             println!("Scan locations:");
@@ -802,7 +802,7 @@ async fn cmd_onboard() -> Result<()> {
             
             let key_config = config::ApiKeyConfig {
                 name: name.to_string(),
-                real_key: key.to_string(),
+                encrypted_key: key.to_string(),
                 fake_key: fake_key.clone(),
                 header_name: header.to_string(),
                 scan_locations: vec![config::ScanLocation::Header(header.to_string())],
@@ -859,7 +859,7 @@ async fn cmd_onboard() -> Result<()> {
             
             let key_config = config::ApiKeyConfig {
                 name: name.to_string(),
-                real_key: key.to_string(),
+                encrypted_key: key.to_string(),
                 fake_key: fake_key.clone(),
                 header_name: template.header_name.to_string(),
                 scan_locations: vec![config::ScanLocation::Header(template.header_name.to_string())],

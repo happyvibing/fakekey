@@ -30,7 +30,7 @@ pub struct ProxyConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ApiKeyConfig {
     pub name: String,
-    pub real_key: String, // Will be encrypted
+    pub encrypted_key: String, // Encrypted real API key
     pub fake_key: String,
     #[serde(default = "default_header_name")]
     pub header_name: String,
@@ -116,8 +116,8 @@ impl AppConfig {
         let mut skipped_count = 0;
         
         for mut key_config in config.api_keys {
-            if !key_config.real_key.is_empty() {
-                match hex::decode(&key_config.real_key)
+            if !key_config.encrypted_key.is_empty() {
+                match hex::decode(&key_config.encrypted_key)
                     .with_context(|| "Failed to decode encrypted real key")
                     .and_then(|encrypted_key| {
                         crate::security::decrypt_data(&encrypted_key)
@@ -129,7 +129,7 @@ impl AppConfig {
                     })
                 {
                     Ok(decrypted) => {
-                        key_config.real_key = decrypted;
+                        key_config.encrypted_key = decrypted;
                         valid_keys.push(key_config);
                     }
                     Err(_) => {
@@ -175,11 +175,11 @@ impl AppConfig {
         let mut config_to_save = self.clone();
         
         for key_config in &mut config_to_save.api_keys {
-            if !key_config.real_key.is_empty() {
+            if !key_config.encrypted_key.is_empty() {
                 let encrypted_key = crate::security::encrypt_data(
-                    key_config.real_key.as_bytes()
+                    key_config.encrypted_key.as_bytes()
                 )?;
-                key_config.real_key = hex::encode(encrypted_key);
+                key_config.encrypted_key = hex::encode(encrypted_key);
             }
         }
         
@@ -214,7 +214,7 @@ impl AppConfig {
     pub fn build_key_map(&self) -> HashMap<String, String> {
         self.api_keys
             .iter()
-            .map(|key_config| (key_config.fake_key.clone(), key_config.real_key.clone()))
+            .map(|key_config| (key_config.fake_key.clone(), key_config.encrypted_key.clone()))
             .collect()
     }
 
@@ -407,7 +407,7 @@ mod tests {
         let config = AppConfig {
             api_keys: vec![ApiKeyConfig {
                 name: "my-openai-key".to_string(),
-                real_key: "sk-real".to_string(),
+                encrypted_key: "sk-real".to_string(),
                 fake_key: "sk-fake_fk".to_string(),
                 header_name: "Authorization".to_string(),
                 scan_locations: vec![],
@@ -427,7 +427,7 @@ mod tests {
         let config = AppConfig {
             api_keys: vec![ApiKeyConfig {
                 name: "my-openai-key".to_string(),
-                real_key: "sk-real".to_string(),
+                encrypted_key: "sk-real".to_string(),
                 fake_key: "sk-fake_fk".to_string(),
                 header_name: "Authorization".to_string(),
                 scan_locations: vec![],
