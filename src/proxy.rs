@@ -22,7 +22,6 @@ use crate::key_handler;
 pub struct ProxyState {
     pub key_map: HashMap<String, String>,
     pub cert_manager: Arc<CertManager>,
-    pub allowed_hosts: Vec<String>,
     pub audit_logger: Option<Arc<AuditLogger>>,
     pub config: Arc<AppConfig>,
 }
@@ -101,37 +100,13 @@ async fn handle_connect(
 
     debug!("CONNECT request to {}", host);
 
-    // Check allowed hosts
-    if !state.allowed_hosts.is_empty()
-        && !state
-            .allowed_hosts
-            .iter()
-            .any(|h| domain.contains(h) || h.contains(&domain))
-    {
-        warn!("Blocked CONNECT to non-allowed host: {}", domain);
-        if let Some(logger) = &state.audit_logger {
-            let _ = logger.log(
-                AuditEventType::AuthFailure,
-                format!("Blocked connection to non-allowed host: {}", domain),
-                false,
-            );
-        }
-        let resp = Response::builder()
-            .status(StatusCode::FORBIDDEN)
-            .body(Full::new(Bytes::from("Host not allowed")))
-            .unwrap();
-        return Ok(resp);
+    // Check if this domain needs MITM (domain filtering always enabled)
+    if !state.config.needs_mitm_for_domain(&domain) {
+        info!("Skipping MITM for {} (no API keys configured for this domain)", domain);
+        // For domains that don't need MITM, we can act as a simple TCP tunnel
+        return handle_simple_tunnel(req, host, domain, state).await;
     }
-
-    // Check if domain filtering is enabled and if this domain needs MITM
-    if state.config.proxy.enable_domain_filtering {
-        if !state.config.needs_mitm_for_domain(&domain) {
-            info!("Skipping MITM for {} (no API keys configured for this domain)", domain);
-            // For domains that don't need MITM, we can act as a simple TCP tunnel
-            return handle_simple_tunnel(req, host, domain, state).await;
-        }
-        debug!("MITM required for {} (API keys may be used)", domain);
-    }
+    debug!("MITM required for {} (API keys may be used)", domain);
 
     // Respond with 200 to establish the tunnel
     tokio::task::spawn(async move {

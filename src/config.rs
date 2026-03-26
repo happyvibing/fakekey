@@ -19,18 +19,12 @@ pub struct ProxyConfig {
     pub port: u16,
     #[serde(default = "default_log_level")]
     pub log_level: String,
-    #[serde(default = "default_data_dir")]
-    pub data_dir: String,
-    #[serde(default)]
-    pub allowed_hosts: Vec<String>,
-    #[serde(default = "default_domain_filtering")]
-    pub enable_domain_filtering: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ApiKeyConfig {
     pub name: String,
-    pub real_key: String, // Will be encrypted
+    pub encrypted_key: String, // Encrypted real API key
     pub fake_key: String,
     #[serde(default = "default_header_name")]
     pub header_name: String,
@@ -62,20 +56,8 @@ fn default_log_level() -> String {
     "info".to_string()
 }
 
-fn default_data_dir() -> String {
-    dirs::home_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join(".fakekey")
-        .to_string_lossy()
-        .into_owned()
-}
-
 fn default_header_name() -> String {
     "Authorization".to_string()
-}
-
-fn default_domain_filtering() -> bool {
-    true // Enable domain filtering by default for better performance
 }
 
 impl Default for ProxyConfig {
@@ -83,9 +65,6 @@ impl Default for ProxyConfig {
         Self {
             port: default_port(),
             log_level: default_log_level(),
-            data_dir: default_data_dir(),
-            allowed_hosts: Vec::new(),
-            enable_domain_filtering: default_domain_filtering(),
         }
     }
 }
@@ -93,9 +72,11 @@ impl Default for ProxyConfig {
 
 
 impl AppConfig {
-    /// Return the resolved data directory path (expanding ~)
+    /// Return the data directory path (always ~/.fakekey)
     pub fn data_dir(&self) -> PathBuf {
-        expand_tilde(&self.proxy.data_dir)
+        dirs::home_dir()
+            .unwrap_or_else(|| PathBuf::from("."))
+            .join(".fakekey")
     }
 
     /// Load config from the default config file path
@@ -111,21 +92,42 @@ impl AppConfig {
         let mut config: AppConfig = serde_json::from_str(&content)
             .with_context(|| "Failed to parse config file")?;
         
-        // Decrypt real keys
-        let data_dir = config.data_dir();
-        let ca_key_path = data_dir.join("certs").join("ca").join("key.pem");
-        let ca_key_pem = fs::read_to_string(&ca_key_path)
-            .with_context(|| format!("Failed to read CA key from {}", ca_key_path.display()))?;
+        // Decrypt real keys using keychain, filter out keys that fail to decrypt
+        let mut valid_keys = Vec::new();
+        let mut skipped_count = 0;
         
-        for key_config in &mut config.api_keys {
-            if !key_config.real_key.is_empty() {
-                let encrypted_key = hex::decode(&key_config.real_key)
-                    .with_context(|| "Failed to decode encrypted real key")?;
-                let decrypted_key = crate::security::decrypt_data_with_ca_key(&encrypted_key, &ca_key_pem)
-                    .with_context(|| "Failed to decrypt real key")?;
-                key_config.real_key = String::from_utf8(decrypted_key)
-                    .with_context(|| "Failed to convert decrypted key to string")?;
+        for mut key_config in config.api_keys {
+            if !key_config.encrypted_key.is_empty() {
+                match hex::decode(&key_config.encrypted_key)
+                    .with_context(|| "Failed to decode encrypted real key")
+                    .and_then(|encrypted_key| {
+                        crate::security::decrypt_data(&encrypted_key)
+                            .with_context(|| "Failed to decrypt real key")
+                    })
+                    .and_then(|decrypted_key| {
+                        String::from_utf8(decrypted_key)
+                            .with_context(|| "Failed to convert decrypted key to string")
+                    })
+                {
+                    Ok(decrypted) => {
+                        key_config.encrypted_key = decrypted;
+                        valid_keys.push(key_config);
+                    }
+                    Err(_) => {
+                        eprintln!("⚠️  Warning: Skipping key '{}' - decryption failed (encryption key may have changed)", key_config.name);
+                        skipped_count += 1;
+                    }
+                }
+            } else {
+                valid_keys.push(key_config);
             }
+        }
+        
+        config.api_keys = valid_keys;
+        
+        if skipped_count > 0 {
+            eprintln!("⚠️  {} key(s) were skipped due to decryption failures.", skipped_count);
+            eprintln!("   Please re-add them using 'fakekey add' command.");
         }
         
         // Log config load if audit logger is available
@@ -150,20 +152,15 @@ impl AppConfig {
             fs::create_dir_all(parent)?;
         }
         
-        // Create a copy and encrypt real keys
+        // Create a copy and encrypt real keys using keychain
         let mut config_to_save = self.clone();
-        let data_dir = config_to_save.data_dir();
-        let ca_key_path = data_dir.join("certs").join("ca").join("key.pem");
-        let ca_key_pem = fs::read_to_string(&ca_key_path)
-            .with_context(|| format!("Failed to read CA key from {}", ca_key_path.display()))?;
         
         for key_config in &mut config_to_save.api_keys {
-            if !key_config.real_key.is_empty() {
-                let encrypted_key = crate::security::encrypt_data_with_ca_key(
-                    key_config.real_key.as_bytes(),
-                    &ca_key_pem
+            if !key_config.encrypted_key.is_empty() {
+                let encrypted_key = crate::security::encrypt_data(
+                    key_config.encrypted_key.as_bytes()
                 )?;
-                key_config.real_key = hex::encode(encrypted_key);
+                key_config.encrypted_key = hex::encode(encrypted_key);
             }
         }
         
@@ -198,7 +195,7 @@ impl AppConfig {
     pub fn build_key_map(&self) -> HashMap<String, String> {
         self.api_keys
             .iter()
-            .map(|key_config| (key_config.fake_key.clone(), key_config.real_key.clone()))
+            .map(|key_config| (key_config.fake_key.clone(), key_config.encrypted_key.clone()))
             .collect()
     }
 
@@ -391,7 +388,7 @@ mod tests {
         let config = AppConfig {
             api_keys: vec![ApiKeyConfig {
                 name: "my-openai-key".to_string(),
-                real_key: "sk-real".to_string(),
+                encrypted_key: "sk-real".to_string(),
                 fake_key: "sk-fake_fk".to_string(),
                 header_name: "Authorization".to_string(),
                 scan_locations: vec![],
@@ -411,7 +408,7 @@ mod tests {
         let config = AppConfig {
             api_keys: vec![ApiKeyConfig {
                 name: "my-openai-key".to_string(),
-                real_key: "sk-real".to_string(),
+                encrypted_key: "sk-real".to_string(),
                 fake_key: "sk-fake_fk".to_string(),
                 header_name: "Authorization".to_string(),
                 scan_locations: vec![],
@@ -434,7 +431,7 @@ mod tests {
         // Add OpenAI key with endpoint
         config.api_keys.push(ApiKeyConfig {
             name: "openai-test".to_string(),
-            real_key: "sk-real".to_string(),
+            encrypted_key: "sk-real".to_string(),
             fake_key: "sk-fake_fk".to_string(),
             header_name: "Authorization".to_string(),
             scan_locations: vec![],
@@ -459,7 +456,7 @@ mod tests {
         // Add API key with multiple endpoints
         config.api_keys.push(ApiKeyConfig {
             name: "multi-endpoint".to_string(),
-            real_key: "sk-real".to_string(),
+            encrypted_key: "sk-real".to_string(),
             fake_key: "sk-fake_fk".to_string(),
             header_name: "Authorization".to_string(),
             scan_locations: vec![],

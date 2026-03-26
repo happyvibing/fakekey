@@ -4,6 +4,7 @@ mod cli;
 mod config;
 mod daemon;
 mod key_handler;
+mod keychain;
 mod proxy;
 mod security;
 mod templates;
@@ -69,6 +70,11 @@ fn cmd_init() -> Result<()> {
 
     init_data_dir(&data_dir)?;
 
+    // Initialize keychain encryption key
+    fakekey::keychain::get_or_create_encryption_key()
+        .with_context(|| "Failed to initialize encryption key in system keychain")?;
+    println!("✓ Encryption key stored in system keychain");
+
     // Generate CA certificate
     let _cert_manager = cert::CertManager::new(&data_dir)
         .with_context(|| "Failed to initialize CA certificate")?;
@@ -87,12 +93,13 @@ fn cmd_init() -> Result<()> {
     println!("  ├── certs/");
     println!("  │   ├── ca/");
     println!("  │   │   ├── cert.pem");
-    println!("  │   │   └── key.pem (used for key encryption)");
+    println!("  │   │   └── key.pem");
     println!("  │   ├── cache/");
     println!("  │   └── ca.crt");
     println!("  ├── logs/");
     println!("  └── pid");
-    println!("\nReal API keys are automatically encrypted using the CA private key.");
+    println!("\n🔐 Real API keys are automatically encrypted using a key stored in system keychain.");
+    println!("   Only this application can access the encryption key.");
     println!("\nNext steps:");
     println!("  1. Add an API key:  fakekey add --name my-openai-key --key \"sk-...\" --template openai");
     println!("  2. Start the proxy: fakekey start");
@@ -172,7 +179,6 @@ async fn cmd_start(port: u16, daemon_mode: bool) -> Result<()> {
     let state = Arc::new(proxy::ProxyState {
         key_map,
         cert_manager,
-        allowed_hosts: config.proxy.allowed_hosts.clone(),
         audit_logger,
         config: Arc::new(config.clone()),
     });
@@ -239,7 +245,7 @@ fn cmd_add(name: &str, key: &str, template: Option<&str>, header: Option<&str>, 
 
     let key_config = ApiKeyConfig {
         name: name.to_string(),
-        real_key: key.to_string(),
+        encrypted_key: key.to_string(),
         fake_key: fake_key.clone(),
         header_name: header_name.clone(),
         scan_locations: vec![ScanLocation::Header(header_name)],
@@ -301,7 +307,7 @@ fn cmd_show(name: &str) -> Result<()> {
         Some(key) => {
             println!("Name:       {}", key.name);
             println!("Fake Key:   {}", key.fake_key);
-            println!("Real Key:   {}", key_handler::mask_key(&key.real_key));
+            println!("Real Key:   {}", key_handler::mask_key(&key.encrypted_key));
             println!("Header:     {}", key.header_name);
             println!("Created:    {}", key.created_at);
             println!("Scan locations:");
@@ -795,7 +801,7 @@ async fn cmd_onboard() -> Result<()> {
             
             let key_config = config::ApiKeyConfig {
                 name: name.to_string(),
-                real_key: key.to_string(),
+                encrypted_key: key.to_string(),
                 fake_key: fake_key.clone(),
                 header_name: header.to_string(),
                 scan_locations: vec![config::ScanLocation::Header(header.to_string())],
@@ -852,7 +858,7 @@ async fn cmd_onboard() -> Result<()> {
             
             let key_config = config::ApiKeyConfig {
                 name: name.to_string(),
-                real_key: key.to_string(),
+                encrypted_key: key.to_string(),
                 fake_key: fake_key.clone(),
                 header_name: template.header_name.to_string(),
                 scan_locations: vec![config::ScanLocation::Header(template.header_name.to_string())],
@@ -922,8 +928,26 @@ async fn cmd_onboard() -> Result<()> {
             println!("   Use 'fakekey stop' to stop the proxy.");
             println!();
             
-            // Start proxy in background (daemon mode)
-            cmd_start(config.proxy.port, true).await?;
+            // Start proxy in background using a separate process
+            let current_exe = std::env::current_exe()
+                .with_context(|| "Failed to get current executable path")?;
+            
+            let mut child = std::process::Command::new(current_exe)
+                .arg("start")
+                .arg("--daemon")
+                .arg("--port")
+                .arg(config.proxy.port.to_string())
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+                .with_context(|| "Failed to start proxy")?;
+            
+            child.wait()
+                .with_context(|| "Failed to wait for proxy startup")?;
+            
+            // Give the daemon a moment to start
+            std::thread::sleep(std::time::Duration::from_millis(500));
         } else {
             println!("💡 Proxy continues running. You can restart it later with:");
             println!("   fakekey stop && fakekey start");
@@ -941,8 +965,26 @@ async fn cmd_onboard() -> Result<()> {
             println!("   Use 'fakekey stop' to stop the proxy.");
             println!();
             
-            // Start proxy in background (daemon mode)
-            cmd_start(config.proxy.port, true).await?;
+            // Start proxy in background using a separate process
+            let current_exe = std::env::current_exe()
+                .with_context(|| "Failed to get current executable path")?;
+            
+            let mut child = std::process::Command::new(current_exe)
+                .arg("start")
+                .arg("--daemon")
+                .arg("--port")
+                .arg(config.proxy.port.to_string())
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+                .with_context(|| "Failed to start proxy")?;
+            
+            child.wait()
+                .with_context(|| "Failed to wait for proxy startup")?;
+            
+            // Give the daemon a moment to start
+            std::thread::sleep(std::time::Duration::from_millis(500));
         } else {
             println!("💡 You can start the proxy later with:");
             println!("   fakekey start --daemon");

@@ -46,7 +46,7 @@ impl AuditLogger {
             event_type,
             details: crate::security::mask_sensitive(&details, &[
                 "api_key",
-                "real_key",
+                "encrypted_key",
                 "Authorization: Bearer ",
                 "sk-",
                 "ghp_",

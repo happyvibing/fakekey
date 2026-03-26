@@ -39,13 +39,13 @@ brew install happyvibing/tap/fakekey
 cargo install fakekey
 ```
 
-#### 从源码编译
+#### 从源码编译安装
 
 ```bash
 git clone https://github.com/happyvibing/fakekey.git
 cd fakekey
 cargo build --release
-# 二进制文件位于: target/release/fakekey
+cargo install --path .
 ```
 
 #### 下载预编译二进制
