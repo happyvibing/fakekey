@@ -928,8 +928,26 @@ async fn cmd_onboard() -> Result<()> {
             println!("   Use 'fakekey stop' to stop the proxy.");
             println!();
             
-            // Start proxy in background (daemon mode)
-            cmd_start(config.proxy.port, true).await?;
+            // Start proxy in background using a separate process
+            let current_exe = std::env::current_exe()
+                .with_context(|| "Failed to get current executable path")?;
+            
+            let mut child = std::process::Command::new(current_exe)
+                .arg("start")
+                .arg("--daemon")
+                .arg("--port")
+                .arg(config.proxy.port.to_string())
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+                .with_context(|| "Failed to start proxy")?;
+            
+            child.wait()
+                .with_context(|| "Failed to wait for proxy startup")?;
+            
+            // Give the daemon a moment to start
+            std::thread::sleep(std::time::Duration::from_millis(500));
         } else {
             println!("💡 Proxy continues running. You can restart it later with:");
             println!("   fakekey stop && fakekey start");
@@ -947,8 +965,26 @@ async fn cmd_onboard() -> Result<()> {
             println!("   Use 'fakekey stop' to stop the proxy.");
             println!();
             
-            // Start proxy in background (daemon mode)
-            cmd_start(config.proxy.port, true).await?;
+            // Start proxy in background using a separate process
+            let current_exe = std::env::current_exe()
+                .with_context(|| "Failed to get current executable path")?;
+            
+            let mut child = std::process::Command::new(current_exe)
+                .arg("start")
+                .arg("--daemon")
+                .arg("--port")
+                .arg(config.proxy.port.to_string())
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+                .with_context(|| "Failed to start proxy")?;
+            
+            child.wait()
+                .with_context(|| "Failed to wait for proxy startup")?;
+            
+            // Give the daemon a moment to start
+            std::thread::sleep(std::time::Duration::from_millis(500));
         } else {
             println!("💡 You can start the proxy later with:");
             println!("   fakekey start --daemon");
