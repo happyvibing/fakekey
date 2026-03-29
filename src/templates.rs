@@ -57,7 +57,7 @@ static ZHIPU_TEMPLATE: ServiceTemplate = ServiceTemplate {
 
 static ZAI_TEMPLATE: ServiceTemplate = ServiceTemplate {
     name: "zai",
-    header_name: "x-api-key",
+    header_name: "Authorization",
     description: "ZAI API (api.z.ai)",
     default_endpoints: &["api.z.ai"],
 };
