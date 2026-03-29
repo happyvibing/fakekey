@@ -28,20 +28,6 @@ pub fn replace_in_url(url: &str, key_map: &HashMap<String, String>) -> (String, 
     (result, count > 0)
 }
 
-/// Replace fake keys in request body bytes.
-/// Returns modified body and whether any replacement was made.
-pub fn replace_in_body(body: &[u8], key_map: &HashMap<String, String>) -> (Vec<u8>, bool) {
-    match std::str::from_utf8(body) {
-        Ok(text) => {
-            let (result, count) = replace_keys(text, key_map);
-            (result.into_bytes(), count > 0)
-        }
-        Err(_) => {
-            // Binary body, no replacement
-            (body.to_vec(), false)
-        }
-    }
-}
 
 /// Mask a key for safe logging (show first 4 and last 4 chars)
 pub fn mask_key(key: &str) -> String {
@@ -68,19 +54,6 @@ mod tests {
         assert_eq!(count, 1);
     }
 
-    #[test]
-    fn test_replace_in_body() {
-        let mut map = HashMap::new();
-        map.insert("ghp_fake_fk".to_string(), "ghp_real1234".to_string());
-
-        let body = br#"{"token": "ghp_fake_fk"}"#;
-        let (result, replaced) = replace_in_body(body, &map);
-        assert!(replaced);
-        assert_eq!(
-            String::from_utf8(result).unwrap(),
-            r#"{"token": "ghp_real1234"}"#
-        );
-    }
 
     #[test]
     fn test_replace_in_url() {

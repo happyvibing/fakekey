@@ -13,7 +13,7 @@ mod tool_launcher;
 use anyhow::{Context, Result};
 use clap::Parser;
 use cli::{CertAction, Cli, Commands};
-use config::{generate_unique_fake_key, init_data_dir, AppConfig, ApiKeyConfig, ScanLocation};
+use config::{generate_unique_fake_key, init_data_dir, AppConfig, ApiKeyConfig};
 use std::net::SocketAddr;
 use std::process::Stdio;
 use std::sync::Arc;
@@ -43,9 +43,8 @@ async fn main() -> Result<()> {
             name,
             key,
             template,
-            header,
             endpoints,
-        } => cmd_add(&name, &key, template.as_deref(), header.as_deref(), endpoints.as_deref())?,
+        } => cmd_add(&name, &key, template.as_deref(), endpoints.as_deref())?,
         Commands::List => cmd_list()?,
         Commands::Show { name } => cmd_show(&name)?,
         Commands::Remove { name } => cmd_remove(&name)?,
@@ -196,7 +195,7 @@ async fn cmd_start(port: u16, daemon_mode: bool) -> Result<()> {
 }
 
 /// Add a new API key
-fn cmd_add(name: &str, key: &str, template: Option<&str>, header: Option<&str>, endpoints: Option<&str>) -> Result<()> {
+fn cmd_add(name: &str, key: &str, template: Option<&str>, endpoints: Option<&str>) -> Result<()> {
     let mut config = AppConfig::load()?;
 
     // Check if name already exists
@@ -211,19 +210,13 @@ fn cmd_add(name: &str, key: &str, template: Option<&str>, header: Option<&str>, 
     let existing_fake_keys: Vec<_> = config.api_keys.iter().map(|k| k.fake_key.as_str()).collect();
     let fake_key = generate_unique_fake_key(key, &existing_fake_keys);
 
-    // Determine header name
-    let header_name = if let Some(tpl) = template {
+    if let Some(tpl) = template {
         if let Some(template_obj) = templates::get_template(tpl) {
             println!("Using template: {}", template_obj.description);
-            template_obj.header_name.to_string()
         } else {
             anyhow::bail!("Template '{}' not found. Run `fakekey templates` to see available templates.", tpl);
         }
-    } else if let Some(h) = header {
-        h.to_string()
-    } else {
-        "Authorization".to_string()
-    };
+    }
 
     // Determine endpoints
     let endpoints_list = if let Some(eps) = endpoints {
@@ -247,8 +240,6 @@ fn cmd_add(name: &str, key: &str, template: Option<&str>, header: Option<&str>, 
         name: name.to_string(),
         encrypted_key: key.to_string(),
         fake_key: fake_key.clone(),
-        header_name: header_name.clone(),
-        scan_locations: vec![ScanLocation::Header(header_name)],
         endpoints: endpoints_list,
         created_at: chrono::Utc::now(),
     };
@@ -286,13 +277,18 @@ fn cmd_list() -> Result<()> {
         return Ok(());
     }
 
-    println!("{:<20} {:<40} {:<20}", "NAME", "FAKE KEY", "HEADER");
+    println!("{:<20} {:<40} {:<20}", "NAME", "FAKE KEY", "ENDPOINTS");
     println!("{}", "-".repeat(80));
 
     for key in &config.api_keys {
+        let endpoints = if key.endpoints.is_empty() {
+            "(any)".to_string()
+        } else {
+            key.endpoints.join(", ")
+        };
         println!(
             "{:<20} {:<40} {:<20}",
-            key.name, key.fake_key, key.header_name
+            key.name, key.fake_key, endpoints
         );
     }
 
@@ -308,16 +304,8 @@ fn cmd_show(name: &str) -> Result<()> {
             println!("Name:       {}", key.name);
             println!("Fake Key:   {}", key.fake_key);
             println!("Real Key:   {}", key_handler::mask_key(&key.encrypted_key));
-            println!("Header:     {}", key.header_name);
+            println!("Endpoints:  {}", if key.endpoints.is_empty() { "(any)".to_string() } else { key.endpoints.join(", ") });
             println!("Created:    {}", key.created_at);
-            println!("Scan locations:");
-            for loc in &key.scan_locations {
-                match loc {
-                    ScanLocation::Header(name) => println!("  - Header: {}", name),
-                    ScanLocation::UrlParam(name) => println!("  - URL Param: {}", name),
-                    ScanLocation::JsonBody(path) => println!("  - JSON Body: {}", path),
-                }
-            }
         }
         None => {
             println!("Key '{}' not found.", name);
@@ -749,7 +737,7 @@ async fn cmd_onboard() -> Result<()> {
         }
         println!();
         
-        print!("Enter template name (or 'custom' for custom header, or 'done' to finish): ");
+        print!("Enter template name (or 'custom' for custom key, or 'done' to finish): ");
         io::stdout().flush()?;
         let mut template_input = String::new();
         io::stdin().read_line(&mut template_input)?;
@@ -782,13 +770,6 @@ async fn cmd_onboard() -> Result<()> {
                 continue;
             }
             
-            print!("Enter header name (default: Authorization): ");
-            io::stdout().flush()?;
-            let mut header = String::new();
-            io::stdin().read_line(&mut header)?;
-            let header = header.trim();
-            let header = if header.is_empty() { "Authorization" } else { header };
-            
             // Add custom key
             let mut config = AppConfig::load()?;
             if config.find_by_name(name).is_some() {
@@ -803,8 +784,6 @@ async fn cmd_onboard() -> Result<()> {
                 name: name.to_string(),
                 encrypted_key: key.to_string(),
                 fake_key: fake_key.clone(),
-                header_name: header.to_string(),
-                scan_locations: vec![config::ScanLocation::Header(header.to_string())],
                 endpoints: vec![], // Empty endpoints for custom keys
                 created_at: chrono::Utc::now(),
             };
@@ -860,8 +839,6 @@ async fn cmd_onboard() -> Result<()> {
                 name: name.to_string(),
                 encrypted_key: key.to_string(),
                 fake_key: fake_key.clone(),
-                header_name: template.header_name.to_string(),
-                scan_locations: vec![config::ScanLocation::Header(template.header_name.to_string())],
                 endpoints: template.default_endpoints.iter().map(|s| s.to_string()).collect(),
                 created_at: chrono::Utc::now(),
             };

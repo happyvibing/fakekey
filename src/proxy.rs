@@ -353,34 +353,21 @@ async fn forward_request(
     }
     headers = new_headers;
 
-    // Remove proxy-related headers
-    headers.remove("proxy-connection");
-    headers.remove("proxy-authorization");
-
-    // Read body
+    // Read body (pass through unchanged)
     let body_bytes = req
         .collect()
         .await
         .map_err(|e| anyhow::anyhow!("Failed to read request body: {}", e))?
         .to_bytes();
 
-    // Replace keys in body
-    let (final_body, body_replaced) = key_handler::replace_in_body(&body_bytes, key_map);
-    if body_replaced {
-        info!("Replaced key in request body for {}", host);
-        if let Some(logger) = audit_logger {
-            let _ = logger.log_key_replacement(&format!("Body for {}", host));
-        }
-    }
-
     // Log request processing
-    let key_replaced = uri_replaced || header_replacements > 0 || body_replaced;
+    let key_replaced = uri_replaced || header_replacements > 0;
     if let Some(logger) = audit_logger {
         let _ = logger.log_request(method.as_str(), upstream_uri, key_replaced);
     }
 
     // Build and send upstream request using hyper client
-    let upstream_resp = send_upstream_request(&method, &final_uri, headers, final_body).await?;
+    let upstream_resp = send_upstream_request(&method, &final_uri, headers, body_bytes.to_vec()).await?;
 
     Ok(upstream_resp)
 }

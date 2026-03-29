@@ -39,10 +39,6 @@ pub enum Commands {
         #[arg(short, long)]
         template: Option<String>,
 
-        /// Custom header name (default: Authorization)
-        #[arg(long)]
-        header: Option<String>,
-
         /// Custom endpoints (comma-separated, e.g., api.openai.com,custom.example.com)
         #[arg(long)]
         endpoints: Option<String>,

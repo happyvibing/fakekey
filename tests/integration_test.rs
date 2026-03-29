@@ -19,37 +19,22 @@ fn test_key_replacement() {
     assert!(replaced);
     assert_eq!(result, "https://api.example.com/v1?token=ghp_real456&foo=bar");
 
-    // Test body replacement
-    let body = br#"{"api_key": "sk-fake_fk"}"#;
-    let (result, replaced) = fakekey::key_handler::replace_in_body(body, &key_map);
-    assert!(replaced);
-    assert_eq!(
-        String::from_utf8(result).unwrap(),
-        r#"{"api_key": "sk-real123"}"#
-    );
 }
 
 #[test]
 fn test_config_management() {
-    use fakekey::config::{ApiKeyConfig, AppConfig, ProxyConfig, ScanLocation};
-    
-    let temp_dir = TempDir::new().unwrap();
+    use fakekey::config::{ApiKeyConfig, AppConfig, ProxyConfig};
 
     // Create a test config
     let mut config = AppConfig {
         proxy: ProxyConfig {
             port: 1155,
             log_level: "info".to_string(),
-            data_dir: temp_dir.path().to_string_lossy().to_string(),
-            allowed_hosts: vec!["api.openai.com".to_string()],
-            enable_domain_filtering: true,
         },
         api_keys: vec![ApiKeyConfig {
             name: "openai".to_string(),
-            real_key: "sk-real123".to_string(),
+            encrypted_key: "sk-real123".to_string(),
             fake_key: "sk-fake_fk".to_string(),
-            header_name: "Authorization".to_string(),
-            scan_locations: vec![ScanLocation::Header("Authorization".to_string())],
             endpoints: vec!["api.openai.com".to_string()],
             created_at: chrono::Utc::now(),
         }],

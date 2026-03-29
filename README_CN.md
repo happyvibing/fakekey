@@ -3,7 +3,7 @@
 在 Openclaw, ClaudeCode 等 AI Agent 盛行的当下，我们不得不将各种服务的 API Token 直接暴露在环境变量中。你的 api_key 会被塞入上下文被模型服务商知道，会被你所信任的龙虾知道，也许是被某个skill捕获读取，更有可能陌生人询问你的龙虾直接得知。太多泄露的案例，我无法信任的将自己绑定信用卡的 api_key 直接暴露给任何 Agent 和本地环境变量中，于是乎 FakeKey 应运而生，最安全的措施就是永远不暴露真实的 api_key。
 
 
-FakeKey 是基于 Rust 开发的高性能 API 密钥代理程序。通过智能代理技术，它能够在任何网络请求中自动将假密钥替换为真实密钥，无需暴露真实凭证，同时保持完整的 HTTP API 兼容性和性能。
+FakeKey 是基于 Rust 开发的高性能 API 密钥代理程序。通过智能代理技术，它能够在 HTTP 请求头和 URL 中自动将假密钥替换为真实密钥，无需暴露真实凭证，同时保持完整的 HTTP API 兼容性和性能。
 
 ## 如何工作
 
@@ -84,8 +84,8 @@ sudo update-ca-certificates
 # 生成 OpenAI 类型密钥假 KEY
 fakekey add --name my-openai-key --key "sk-proj-xxxxx" --template openai
 
-# 生成自定义 Header 的密钥假 KEY
-fakekey add --name my-custom --key "xxxxx" --header "X-Custom-Key"
+# 生成自定义密钥假 KEY
+fakekey add --name my-custom --key "xxxxx"
 
 # 查看可用模板
 fakekey templates
