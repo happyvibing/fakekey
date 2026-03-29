@@ -26,25 +26,10 @@ pub struct ApiKeyConfig {
     pub name: String,
     pub encrypted_key: String, // Encrypted real API key
     pub fake_key: String,
-    #[serde(default = "default_header_name")]
-    pub header_name: String,
-    #[serde(default)]
-    pub scan_locations: Vec<ScanLocation>,
     #[serde(default)]
     pub endpoints: Vec<String>, // 具体的端点域名列表
     #[serde(default = "Utc::now")]
     pub created_at: DateTime<Utc>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type", content = "name")]
-pub enum ScanLocation {
-    #[serde(rename = "header")]
-    Header(String),
-    #[serde(rename = "url_param")]
-    UrlParam(String),
-    #[serde(rename = "json_body")]
-    JsonBody(String),
 }
 
 
@@ -56,9 +41,6 @@ fn default_log_level() -> String {
     "info".to_string()
 }
 
-fn default_header_name() -> String {
-    "Authorization".to_string()
-}
 
 impl Default for ProxyConfig {
     fn default() -> Self {
@@ -390,8 +372,6 @@ mod tests {
                 name: "my-openai-key".to_string(),
                 encrypted_key: "sk-real".to_string(),
                 fake_key: "sk-fake_fk".to_string(),
-                header_name: "Authorization".to_string(),
-                scan_locations: vec![],
                 endpoints: vec!["api.openai.com".to_string()],
                 created_at: Utc::now(),
             }],
@@ -410,8 +390,6 @@ mod tests {
                 name: "my-openai-key".to_string(),
                 encrypted_key: "sk-real".to_string(),
                 fake_key: "sk-fake_fk".to_string(),
-                header_name: "Authorization".to_string(),
-                scan_locations: vec![],
                 endpoints: vec!["api.openai.com".to_string()],
                 created_at: Utc::now(),
             }],
@@ -433,8 +411,6 @@ mod tests {
             name: "openai-test".to_string(),
             encrypted_key: "sk-real".to_string(),
             fake_key: "sk-fake_fk".to_string(),
-            header_name: "Authorization".to_string(),
-            scan_locations: vec![],
             endpoints: vec!["api.openai.com".to_string()],
             created_at: Utc::now(),
         });
@@ -458,8 +434,6 @@ mod tests {
             name: "multi-endpoint".to_string(),
             encrypted_key: "sk-real".to_string(),
             fake_key: "sk-fake_fk".to_string(),
-            header_name: "Authorization".to_string(),
-            scan_locations: vec![],
             endpoints: vec![
                 "api.openai.com".to_string(),
                 "api.github.com".to_string(),

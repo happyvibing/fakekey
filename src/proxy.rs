@@ -353,34 +353,21 @@ async fn forward_request(
     }
     headers = new_headers;
 
-    // Remove proxy-related headers
-    headers.remove("proxy-connection");
-    headers.remove("proxy-authorization");
-
-    // Read body
+    // Read body (pass through unchanged)
     let body_bytes = req
         .collect()
         .await
         .map_err(|e| anyhow::anyhow!("Failed to read request body: {}", e))?
         .to_bytes();
 
-    // Replace keys in body
-    let (final_body, body_replaced) = key_handler::replace_in_body(&body_bytes, key_map);
-    if body_replaced {
-        info!("Replaced key in request body for {}", host);
-        if let Some(logger) = audit_logger {
-            let _ = logger.log_key_replacement(&format!("Body for {}", host));
-        }
-    }
-
     // Log request processing
-    let key_replaced = uri_replaced || header_replacements > 0 || body_replaced;
+    let key_replaced = uri_replaced || header_replacements > 0;
     if let Some(logger) = audit_logger {
         let _ = logger.log_request(method.as_str(), upstream_uri, key_replaced);
     }
 
     // Build and send upstream request using hyper client
-    let upstream_resp = send_upstream_request(&method, &final_uri, headers, final_body).await?;
+    let upstream_resp = send_upstream_request(&method, &final_uri, headers, body_bytes.to_vec()).await?;
 
     Ok(upstream_resp)
 }
@@ -415,9 +402,11 @@ async fn send_upstream_request(
         let mut root_store = rustls::RootCertStore::empty();
         root_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
 
-        let tls_config = rustls::ClientConfig::builder()
+        let mut tls_config = rustls::ClientConfig::builder()
             .with_root_certificates(root_store)
             .with_no_client_auth();
+        
+        tls_config.alpn_protocols = vec![b"http/1.1".to_vec()];
 
         let connector = tokio_rustls::TlsConnector::from(Arc::new(tls_config));
         let server_name = rustls::pki_types::ServerName::try_from(host.to_string())
@@ -452,8 +441,8 @@ where
         .await
         .with_context(|| "HTTP handshake failed")?;
 
-    // Spawn connection driver
-    tokio::spawn(async move {
+    // Spawn connection driver with abort handle
+    let conn_task = tokio::spawn(async move {
         if let Err(e) = conn.await {
             debug!("Upstream connection ended: {}", e);
         }
@@ -468,46 +457,82 @@ where
         .method(method.clone())
         .uri(path_and_query);
 
-    // Copy headers
+    // Copy headers, skipping hop-by-hop and headers we'll set ourselves
     for (name, value) in headers.iter() {
-        // Skip hop-by-hop headers
         let name_str = name.as_str();
         if matches!(
             name_str,
             "transfer-encoding" | "connection" | "keep-alive" | "te" | "trailer" | "upgrade"
+            | "host" | "content-length"
         ) {
             continue;
         }
         req_builder = req_builder.header(name, value);
     }
 
-    // Ensure Host header is set
+    // Set Host header (only once, from the URI)
     if let Some(host) = uri.host() {
         let host_value = if let Some(port) = uri.port() {
-            format!("{}:{}", host, port)
+            let default_port = if uri.scheme_str() == Some("https") { 443 } else { 80 };
+            if port.as_u16() == default_port {
+                host.to_string()
+            } else {
+                format!("{}:{}", host, port)
+            }
         } else {
             host.to_string()
         };
-        req_builder = req_builder.header("host", host_value);
+        req_builder = req_builder.header("host", &host_value);
     }
+
+    // Set Content-Length to match actual body size
+    req_builder = req_builder.header("content-length", body.len().to_string());
 
     let upstream_req = req_builder
         .body(Full::new(Bytes::from(body)))
         .with_context(|| "Failed to build upstream request")?;
 
-    let resp = sender
-        .send_request(upstream_req)
-        .await
-        .map_err(|e| anyhow::anyhow!("Failed to send upstream request: {}", e))?;
+    debug!("Upstream request: {} {} headers={:?}", upstream_req.method(), upstream_req.uri(), upstream_req.headers());
 
-    // Read response body
-    let (parts, incoming_body) = resp.into_parts();
-    let resp_body = incoming_body
-        .collect()
-        .await
-        .map_err(|e| anyhow::anyhow!("Failed to read upstream response: {}", e))?
-        .to_bytes();
+    // Add timeout for the entire request-response cycle
+    let host_str = uri.host().unwrap_or("unknown");
+    let request_future = async {
+        let resp = sender
+            .send_request(upstream_req)
+            .await
+            .map_err(|e| {
+                error!("Failed to send request to {}: {} (type: {:?})", host_str, e, std::any::type_name_of_val(&e));
+                anyhow::anyhow!("Failed to send upstream request: {}", e)
+            })?;
 
-    let response = Response::from_parts(parts, Full::new(resp_body));
-    Ok(response)
+        // Read response body
+        let (parts, incoming_body) = resp.into_parts();
+        let resp_body = incoming_body
+            .collect()
+            .await
+            .map_err(|e| {
+                error!("Failed to read response from {}: {}", host_str, e);
+                anyhow::anyhow!("Failed to read upstream response: {}", e)
+            })?
+            .to_bytes();
+
+        let response = Response::from_parts(parts, Full::new(resp_body));
+        Ok::<_, anyhow::Error>(response)
+    };
+
+    // Wait for both the request and connection driver with timeout
+    let timeout_duration = std::time::Duration::from_secs(30);
+    let result = tokio::time::timeout(timeout_duration, request_future).await;
+    
+    // Abort connection task after request completes or times out
+    conn_task.abort();
+    
+    match result {
+        Ok(Ok(response)) => Ok(response),
+        Ok(Err(e)) => Err(e),
+        Err(_) => {
+            error!("Request to {} timed out after {:?}", host_str, timeout_duration);
+            Err(anyhow::anyhow!("Request timeout after {:?}", timeout_duration))
+        }
+    }
 }
