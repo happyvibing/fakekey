@@ -1,3 +1,7 @@
+<p align="center">
+<b><a href="README.md">English</a></b> | 中文
+</p>
+
 # FakeKey - API Key Proxy Agent
 
 在 Openclaw, ClaudeCode 等 AI Agent 盛行的当下，我们不得不将各种服务的 API Token 直接暴露在环境变量中。你的 api_key 会被塞入上下文被模型服务商知道，会被你所信任的龙虾知道，也许是被某个skill捕获读取，更有可能陌生人询问你的龙虾直接得知。太多泄露的案例，我无法信任的将自己绑定信用卡的 api_key 直接暴露给任何 Agent 和本地环境变量中，于是乎 FakeKey 应运而生，最安全的措施就是永远不暴露真实的 api_key。
