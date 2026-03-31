@@ -81,13 +81,13 @@ cargo audit
 
 # Create release (automated)
 git add .
-git commit -m "Release v0.1.2"
-git tag v0.1.2
+git commit -m "Release v0.1.3"
+git tag v0.1.3
 git push origin main --tags
 
 # Check release status
 gh release list
-gh release view v0.1.2
+gh release view v0.1.3
 cargo search fakekey
 ```
 

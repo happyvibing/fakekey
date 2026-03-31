@@ -4,7 +4,7 @@
 
 # FakeKey - API Key Proxy Agent
 
-In the era of AI Agents like Openclaw, ClaudeCode, etc., we have to expose various service API Tokens directly in environment variables. Your api_key will be inserted into context and known by model service providers, known by the lobsters you trust, perhaps captured and read by some skill, and even more likely to be directly learned by strangers asking your lobster. There are too many leak cases, I cannot trust to bind my credit card-linked api_key directly exposed to any Agent and local environment variables, so FakeKey was created, the safest measure is to never expose the real api_key.
+With the widespread adoption of AI Agents, configuring various service API Tokens directly in environment variables has become common practice. Your api_key will be inserted into context and known by model service providers, known by the lobsters you trust, perhaps captured and read by some skill, and even more likely to be directly learned by strangers asking your lobster. There are too many leak cases, I cannot trust to bind my credit card-linked api_key directly exposed to any Agent and local environment variables, so FakeKey was created, the safest measure is to never expose the real api_key.
 
 FakeKey is a high-performance API key proxy program developed in Rust. Through intelligent proxy technology, it can automatically replace fake keys with real keys in HTTP headers and URLs without exposing real credentials, while maintaining complete HTTP API compatibility and performance.
 
@@ -105,10 +105,10 @@ fakekey remove --name my-openai-key
 # View status
 fakekey status
 
-# Run (default background)
+# Start proxy (auto-configures environment variables)
 fakekey start
 
-# Stop
+# Stop proxy (auto-cleans environment variables)
 fakekey stop
 
 # View logs
@@ -136,20 +136,22 @@ This command automatically completes the following operations:
 3. Launch the tool with proxy protection enabled
 4. All your API keys will be automatically protected!
 
-### Manual Proxy Configuration
+### Automatic Proxy Configuration
 
-If you prefer manual configuration:
+FakeKey automatically manages your shell environment variables - no manual configuration needed:
 
-- Replace real API keys with generated fake keys in your Agent or application
-- Set the network proxy to `http://127.0.0.1:1155` in your Agent or application
+- **On start**: `fakekey start` automatically adds the following environment variables to your shell configuration file (`.zshrc`, `.bashrc`, etc.):
+  - `http_proxy=http://127.0.0.1:1155`
+  - `https_proxy=http://127.0.0.1:1155`
+  - `NODE_EXTRA_CA_CERTS=~/.fakekey/certs/ca.crt`
+  - `SSL_CERT_FILE=~/.fakekey/certs/ca.crt`
+  - `REQUESTS_CA_BUNDLE=~/.fakekey/certs/ca.crt`
 
-For example, first set the network proxy:
-```bash
-export http_proxy=http://127.0.0.1:1155
-export https_proxy=http://127.0.0.1:1155
-export NODE_EXTRA_CA_CERTS=~/.fakekey/certs/ca.crt
-```
-Then launch your Agent such as `claude`, `openclaw`, `pi`
+- **On stop**: `fakekey stop` automatically cleans up these environment variables
+
+- **Usage**: Simply replace real API keys with generated fake keys in your Agent or application
+
+> 💡 **Tip**: After environment variables are configured, you'll be prompted to run `source ~/.zshrc` (or your config file) to apply changes immediately.
 
 ## Security
 

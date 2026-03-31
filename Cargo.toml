@@ -1,6 +1,6 @@
 [package]
 name = "fakekey"
-version = "0.1.2"
+version = "0.1.3"
 edition = "2024"
 description = "API Key Proxy Agent - manage and replace API keys via network proxy"
 license = "Apache-2.0"

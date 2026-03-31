@@ -116,6 +116,17 @@ async fn cmd_start(port: u16, foreground_mode: bool) -> Result<()> {
 
     // Start in background mode by default unless foreground is specified
     if !foreground_mode && !daemon::is_daemon_mode() {
+        // Setup shell proxy env vars in the interactive parent process (before the parent exits).
+        let ca_cert_path = data_dir.join("certs").join("ca.crt");
+        if data_dir.exists() && ca_cert_path.exists() {
+            let (shell_name, rc_path) = detect_shell_and_rc();
+            println!("🌐 Configuring shell environment ({} → {})...", shell_name, rc_path.display());
+            match setup_shell_proxy_vars(port, &ca_cert_path) {
+                Ok(true) => println!(),
+                Ok(false) => println!(),
+                Err(e) => eprintln!("   ⚠️  Could not update shell config: {}", e),
+            }
+        }
         daemon::daemonize(&pid_file)?;
     }
 
@@ -468,6 +479,13 @@ fn cmd_stop() -> Result<()> {
         std::fs::remove_file(&pid_file)?;
     }
 
+    // Remove proxy environment variables from the user's shell config
+    match remove_shell_proxy_vars() {
+        Ok(true) => {}
+        Ok(false) => println!("   (No proxy environment variables found in shell config)"),
+        Err(e) => eprintln!("   ⚠️  Could not update shell config: {}", e),
+    }
+
     Ok(())
 }
 
@@ -528,6 +546,13 @@ fn cmd_templates() -> Result<()> {
     Ok(())
 }
 
+/// Marker constants for the proxy environment variable block written to shell RC files
+const PROXY_ENV_MARKER: &str = "# >>> fakekey proxy environment variables >>>";
+const PROXY_ENV_MARKER_END: &str = "# <<< fakekey proxy environment variables <<<";
+/// Legacy marker from older versions (for removal compatibility)
+const LEGACY_ENV_MARKER: &str = "# >>> fakekey CA certificate environment variables >>>";
+const LEGACY_ENV_MARKER_END: &str = "# <<< fakekey CA certificate environment variables <<<";
+
 /// Detect the user's shell and return (shell_name, rc_file_path)
 fn detect_shell_and_rc() -> (String, std::path::PathBuf) {
     let home = dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("."));
@@ -555,26 +580,52 @@ fn detect_shell_and_rc() -> (String, std::path::PathBuf) {
     }
 }
 
-/// Setup shell environment variables for CA certificate trust.
-/// Adds NODE_EXTRA_CA_CERTS, SSL_CERT_FILE, REQUESTS_CA_BUNDLE to the shell RC file.
-/// Returns Ok(true) if changes were made, Ok(false) if already configured.
-fn setup_shell_env_vars(ca_cert_path: &std::path::Path) -> Result<bool> {
+/// Remove a delimited marker block from text, eating any leading blank line before the marker.
+fn remove_marker_block(content: &str, start_marker: &str, end_marker: &str) -> String {
+    if let (Some(start_pos), Some(end_pos)) = (content.find(start_marker), content.find(end_marker)) {
+        let end_full = end_pos + end_marker.len();
+        // Eat trailing newline after end marker
+        let end_final = if content.as_bytes().get(end_full) == Some(&b'\n') {
+            end_full + 1
+        } else {
+            end_full
+        };
+        // Eat the leading newline we inserted before the block
+        let start_final = if start_pos > 0 && content.as_bytes().get(start_pos - 1) == Some(&b'\n') {
+            start_pos - 1
+        } else {
+            start_pos
+        };
+        let mut result = content[..start_final].to_string();
+        result.push_str(&content[end_final..]);
+        return result;
+    }
+    content.to_string()
+}
+
+/// Setup shell proxy environment variables (http_proxy, https_proxy, NODE_EXTRA_CA_CERTS,
+/// SSL_CERT_FILE, REQUESTS_CA_BUNDLE) in the user's shell RC file.
+/// Returns Ok(true) if the file was modified, Ok(false) if already configured.
+fn setup_shell_proxy_vars(port: u16, ca_cert_path: &std::path::Path) -> Result<bool> {
     use std::io::Write;
 
     let (shell_name, rc_path) = detect_shell_and_rc();
     let ca_path_str = ca_cert_path.to_string_lossy();
+    let proxy_url = format!("http://127.0.0.1:{}", port);
 
-    // Marker to identify our block
-    let marker = "# >>> fakekey CA certificate environment variables >>>";
-    let marker_end = "# <<< fakekey CA certificate environment variables <<<";
-
-    // Check if already configured
+    // Check if already configured (new or legacy marker)
     if rc_path.exists() {
         let content = std::fs::read_to_string(&rc_path)
             .with_context(|| format!("Failed to read {}", rc_path.display()))?;
-        if content.contains(marker) {
-            println!("   ✅ Environment variables already configured in {}", rc_path.display());
+        if content.contains(PROXY_ENV_MARKER) {
+            println!("   ✅ Proxy environment variables already configured in {}", rc_path.display());
             return Ok(false);
+        }
+        // Remove legacy CA-cert-only block so we can replace it with the unified block
+        if content.contains(LEGACY_ENV_MARKER) {
+            let cleaned = remove_marker_block(&content, LEGACY_ENV_MARKER, LEGACY_ENV_MARKER_END);
+            std::fs::write(&rc_path, &cleaned)
+                .with_context(|| format!("Failed to update {}", rc_path.display()))?;
         }
     }
 
@@ -583,26 +634,32 @@ fn setup_shell_env_vars(ca_cert_path: &std::path::Path) -> Result<bool> {
         format!(
             r#"
 {marker}
+set -gx http_proxy "{proxy_url}"
+set -gx https_proxy "{proxy_url}"
 set -gx NODE_EXTRA_CA_CERTS "{ca_path}"
 set -gx SSL_CERT_FILE "{ca_path}"
 set -gx REQUESTS_CA_BUNDLE "{ca_path}"
 {marker_end}
 "#,
-            marker = marker,
-            marker_end = marker_end,
+            marker = PROXY_ENV_MARKER,
+            marker_end = PROXY_ENV_MARKER_END,
+            proxy_url = proxy_url,
             ca_path = ca_path_str,
         )
     } else {
         format!(
             r#"
 {marker}
+export http_proxy="{proxy_url}"
+export https_proxy="{proxy_url}"
 export NODE_EXTRA_CA_CERTS="{ca_path}"
 export SSL_CERT_FILE="{ca_path}"
 export REQUESTS_CA_BUNDLE="{ca_path}"
 {marker_end}
 "#,
-            marker = marker,
-            marker_end = marker_end,
+            marker = PROXY_ENV_MARKER,
+            marker_end = PROXY_ENV_MARKER_END,
+            proxy_url = proxy_url,
             ca_path = ca_path_str,
         )
     };
@@ -622,20 +679,53 @@ export REQUESTS_CA_BUNDLE="{ca_path}"
     file.write_all(env_block.as_bytes())
         .with_context(|| format!("Failed to write to {}", rc_path.display()))?;
 
-    println!("   ✅ Added environment variables to {}", rc_path.display());
+    println!("   ✅ Added proxy environment variables to {}", rc_path.display());
     println!();
-    println!("   The following variables were added:");
+    println!("   Variables added:");
+    println!("   • http_proxy           — HTTP proxy for CLI tools");
+    println!("   • https_proxy          — HTTPS proxy for CLI tools");
     println!("   • NODE_EXTRA_CA_CERTS  — for Node.js (Claude Code, VS Code, etc.)");
     println!("   • SSL_CERT_FILE        — for Go, Ruby, and other tools");
     println!("   • REQUESTS_CA_BUNDLE   — for Python requests library");
     println!();
-    println!("   🔄 To apply now, run:");
-    if shell_name == "fish" {
-        println!("      source {}", rc_path.display());
-    } else {
-        println!("      source {}", rc_path.display());
+    println!("   🔄 To apply in the current session, run:");
+    println!("      source {}", rc_path.display());
+
+    Ok(true)
+}
+
+/// Remove proxy environment variables previously added by setup_shell_proxy_vars from the
+/// user's shell RC file. Handles both the current and legacy marker formats.
+/// Returns Ok(true) if anything was removed, Ok(false) if nothing was found.
+fn remove_shell_proxy_vars() -> Result<bool> {
+    let (_, rc_path) = detect_shell_and_rc();
+    if !rc_path.exists() {
+        return Ok(false);
     }
 
+    let content = std::fs::read_to_string(&rc_path)
+        .with_context(|| format!("Failed to read {}", rc_path.display()))?;
+
+    let has_new = content.contains(PROXY_ENV_MARKER);
+    let has_legacy = content.contains(LEGACY_ENV_MARKER);
+
+    if !has_new && !has_legacy {
+        return Ok(false);
+    }
+
+    let mut updated = content;
+    if has_new {
+        updated = remove_marker_block(&updated, PROXY_ENV_MARKER, PROXY_ENV_MARKER_END);
+    }
+    if has_legacy {
+        updated = remove_marker_block(&updated, LEGACY_ENV_MARKER, LEGACY_ENV_MARKER_END);
+    }
+
+    std::fs::write(&rc_path, &updated)
+        .with_context(|| format!("Failed to write {}", rc_path.display()))?;
+
+    println!("✅ Removed proxy environment variables from {}", rc_path.display());
+    println!("   💡 Run: source {} to apply changes", rc_path.display());
     Ok(true)
 }
 
@@ -662,66 +752,72 @@ async fn cmd_onboard() -> Result<()> {
     }
 
     // Step 2: Trust CA certificate
-    println!("🔐 Step 2: Certificate Setup");
-    println!("   FakeKey needs to generate a CA certificate to intercept HTTPS traffic.");
-    println!("   You need to trust this certificate on your system.");
+    let ca_cert_path = data_dir.join("certs").join("ca.crt");
+
+    println!("╔══════════════════════════════════════════════════════════════════════════╗");
+    println!("║  ⚠️  ACTION REQUIRED: INSTALL CA CERTIFICATE  (needs sudo)  ⚠️         ║");
+    println!("║                                                                          ║");
+    println!("║  FakeKey CANNOT intercept HTTPS traffic without a trusted certificate.  ║");
+    println!("║  You MUST run the command for your OS below before proceeding.          ║");
+    println!("╚══════════════════════════════════════════════════════════════════════════╝");
     println!();
-    
-    println!("📍 CA certificate location: {}/certs/ca.crt", data_dir.display());
+    println!("📍 CA certificate: {}", ca_cert_path.display());
     println!();
-    
-    println!("🍎 macOS (run this in a separate terminal):");
-    println!("   sudo security add-trusted-cert -d -r trustRoot \\");
-    println!("     -k /Library/Keychains/System.keychain {}/certs/ca.crt", data_dir.display());
+    println!("┌─ 🍎 macOS ────────────────────────────────────────────────────────────┐");
+    println!("│  sudo security add-trusted-cert -d -r trustRoot \\");
+    println!("│    -k /Library/Keychains/System.keychain \\");
+    println!("│    {}", ca_cert_path.display());
+    println!("└───────────────────────────────────────────────────────────────────────┘");
     println!();
-    
-    println!("🐧 Linux (run this in a separate terminal):");
-    println!("   sudo cp {}/certs/ca.crt /usr/local/share/ca-certificates/fakekey.crt", data_dir.display());
-    println!("   sudo update-ca-certificates");
+    println!("┌─ 🐧 Linux ────────────────────────────────────────────────────────────┐");
+    println!("│  sudo cp {} \\", ca_cert_path.display());
+    println!("│    /usr/local/share/ca-certificates/fakekey.crt");
+    println!("│  sudo update-ca-certificates");
+    println!("└───────────────────────────────────────────────────────────────────────┘");
     println!();
-    
-    println!("🪟 Windows:");
-    println!("   1. Run: certmgr.msc");
-    println!("   2. Go to Trusted Root Certification Authorities → Certificates");
-    println!("   3. Right-click → All Tasks → Import");
-    println!("   4. Select: {}/certs/ca.crt", data_dir.display());
+    println!("┌─ 🪟 Windows ──────────────────────────────────────────────────────────┐");
+    println!("│  1. Run: certmgr.msc                                                  │");
+    println!("│  2. Go to: Trusted Root Certification Authorities → Certificates      │");
+    println!("│  3. Right-click → All Tasks → Import                                  │");
+    println!("│  4. Select: {}  │", ca_cert_path.display());
+    println!("└───────────────────────────────────────────────────────────────────────┘");
     println!();
-    
-    print!("Have you trusted the CA certificate? (y/N): ");
+
     use std::io;
     use std::io::Write;
+    print!("Have you run the sudo command and trusted the CA certificate? (y/N): ");
     io::stdout().flush()?;
     let mut input = String::new();
     io::stdin().read_line(&mut input)?;
-    
+
     if !input.trim().to_lowercase().starts_with('y') {
-        println!("⚠️  Please trust the CA certificate before continuing.");
-        println!("   HTTPS requests will fail without a trusted certificate.");
+        println!();
+        println!("⚠️  WARNING: HTTPS interception will NOT work until the certificate is trusted.");
+        println!("   Run the sudo command above, then restart with: fakekey onboard");
         println!();
     } else {
         println!("✅ Certificate trusted!");
         println!();
     }
 
-    // Step 2b: Setup shell environment variables for CA trust
-    println!("🌐 Configuring shell environment for CA certificate trust...");
+    // Step 2b: Setup shell proxy environment variables
+    println!("🌐 Step 2b: Configuring shell proxy environment...");
     let (shell_name, rc_path) = detect_shell_and_rc();
     println!("   Detected shell: {} ({})", shell_name, rc_path.display());
-    let ca_cert_path = data_dir.join("certs").join("ca.crt");
-    match setup_shell_env_vars(&ca_cert_path) {
+    let config_port = config.proxy.port;
+    match setup_shell_proxy_vars(config_port, &ca_cert_path) {
         Ok(true) => {
             println!();
         }
         Ok(false) => {
-            // Already configured, message printed inside the function
             println!();
         }
         Err(e) => {
             println!("   ⚠️  Failed to auto-configure shell environment: {}", e);
-            println!("   You can manually add these to your {}:", rc_path.display());
+            println!("   Add these lines manually to {}:", rc_path.display());
+            println!("      export http_proxy=\"http://127.0.0.1:{}\"", config_port);
+            println!("      export https_proxy=\"http://127.0.0.1:{}\"", config_port);
             println!("      export NODE_EXTRA_CA_CERTS=\"{}\"", ca_cert_path.display());
-            println!("      export SSL_CERT_FILE=\"{}\"", ca_cert_path.display());
-            println!("      export REQUESTS_CA_BUNDLE=\"{}\"", ca_cert_path.display());
             println!();
         }
     }
