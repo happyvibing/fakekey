@@ -979,18 +979,8 @@ async fn cmd_onboard() -> Result<()> {
 
 /// Run a CLI tool with proxy automatically configured
 async fn cmd_run(tool_name: &str, args: &[String]) -> Result<()> {
-    let tool = tool_launcher::get_tool(tool_name)
-        .ok_or_else(|| {
-            let available: Vec<String> = tool_launcher::list_tools()
-                .iter()
-                .map(|t| format!("  - {}: {}", t.name, t.description))
-                .collect();
-            anyhow::anyhow!(
-                "Unknown tool: '{}'\n\nAvailable tools:\n{}",
-                tool_name,
-                available.join("\n")
-            )
-        })?;
+    // Check if it's a predefined tool or an arbitrary command
+    let tool = tool_launcher::get_tool(tool_name);
     
     let config = AppConfig::load()?;
     let data_dir = config.data_dir();
@@ -1060,7 +1050,18 @@ async fn cmd_run(tool_name: &str, args: &[String]) -> Result<()> {
         }
     }
     
-    tool_launcher::launch_tool(tool, args, config.proxy.port, &ca_cert_path)?;
+    // Launch the tool or command
+    if let Some(tool) = tool {
+        // Predefined tool
+        tool_launcher::launch_tool(tool, args, config.proxy.port, &ca_cert_path)?;
+    } else {
+        // Arbitrary command
+        let dynamic_tool = tool_launcher::DynamicTool {
+            name: tool_name.to_string(),
+            command: tool_name.to_string(),
+        };
+        tool_launcher::launch_dynamic_tool(&dynamic_tool, args, config.proxy.port, &ca_cert_path)?;
+    }
     
     Ok(())
 }
