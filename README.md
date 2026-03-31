@@ -4,7 +4,7 @@
 
 # FakeKey - API Key Proxy Agent
 
-In the era of AI Agents like Openclaw, ClaudeCode, etc., we have to expose various service API Tokens directly in environment variables. Your api_key will be inserted into context and known by model service providers, known by the lobsters you trust, perhaps captured and read by some skill, and even more likely to be directly learned by strangers asking your lobster. There are too many leak cases, I cannot trust to bind my credit card-linked api_key directly exposed to any Agent and local environment variables, so FakeKey was created, the safest measure is to never expose the real api_key.
+With the widespread adoption of AI Agents, configuring various service API Tokens directly in environment variables has become common practice. Your api_key will be inserted into context and known by model service providers, known by the lobsters you trust, perhaps captured and read by some skill, and even more likely to be directly learned by strangers asking your lobster. There are too many leak cases, I cannot trust to bind my credit card-linked api_key directly exposed to any Agent and local environment variables, so FakeKey was created, the safest measure is to never expose the real api_key.
 
 FakeKey is a high-performance API key proxy program developed in Rust. Through intelligent proxy technology, it can automatically replace fake keys with real keys in HTTP headers and URLs without exposing real credentials, while maintaining complete HTTP API compatibility and performance.
 
