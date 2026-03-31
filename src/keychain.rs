@@ -60,7 +60,7 @@ mod platform {
 #[cfg(target_os = "linux")]
 mod platform {
     use super::*;
-    use secret_service::{SecretService, EncryptionType};
+    use secret_service::{blocking::SecretService, EncryptionType};
     use std::collections::HashMap;
 
     pub fn get_or_create_encryption_key() -> Result<[u8; 32]> {
