@@ -12,10 +12,10 @@ FakeKey is a high-performance API key proxy program developed in Rust. Through i
 
 ```
 ┌─────────────────┐         ┌──────────────────────────┐         ┌─────────────────┐
-│   Client Agent  │ HTTP/S  │   FakeKey Proxy          │ HTTP/S  │  External API   │
-│                 │────────▶│  1. TLS Decryption        │────────▶ │                 │
-│  Uses fake key   │         │  2. Identify & replace key │         │  Receives real key│
-│  sk-xxx_fk      │         │  3. Forward request        │         │  sk-xxx         │
+│   Client Agent  │ HTTP/S  │       FakeKey Proxy      │ HTTP/S  │  External API   │
+│                 │────────▶│  1. TLS Decryption       │────────▶│                 │
+│  Uses fake key  │         │  2. Identify replace key │         │  Get real key   │
+│  sk-xxx_fk      │         │  3. Forward request      │         │  sk-xxx         │
 └─────────────────┘         └──────────────────────────┘         └─────────────────┘
 ```
 
