@@ -272,6 +272,7 @@ mod tests {
     use super::*;
 
     #[test]
+    #[ignore = "requires system keychain (macOS Keychain / Linux Secret Service / Windows Credential Manager)"]
     fn test_get_or_create_key() {
         // This test will interact with actual macOS Keychain
         // Clean up first
