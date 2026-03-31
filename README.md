@@ -105,10 +105,10 @@ fakekey remove --name my-openai-key
 # View status
 fakekey status
 
-# Run (default background)
+# Start proxy (auto-configures environment variables)
 fakekey start
 
-# Stop
+# Stop proxy (auto-cleans environment variables)
 fakekey stop
 
 # View logs
@@ -136,20 +136,22 @@ This command automatically completes the following operations:
 3. Launch the tool with proxy protection enabled
 4. All your API keys will be automatically protected!
 
-### Manual Proxy Configuration
+### Automatic Proxy Configuration
 
-If you prefer manual configuration:
+FakeKey automatically manages your shell environment variables - no manual configuration needed:
 
-- Replace real API keys with generated fake keys in your Agent or application
-- Set the network proxy to `http://127.0.0.1:1155` in your Agent or application
+- **On start**: `fakekey start` automatically adds the following environment variables to your shell configuration file (`.zshrc`, `.bashrc`, etc.):
+  - `http_proxy=http://127.0.0.1:1155`
+  - `https_proxy=http://127.0.0.1:1155`
+  - `NODE_EXTRA_CA_CERTS=~/.fakekey/certs/ca.crt`
+  - `SSL_CERT_FILE=~/.fakekey/certs/ca.crt`
+  - `REQUESTS_CA_BUNDLE=~/.fakekey/certs/ca.crt`
 
-For example, first set the network proxy:
-```bash
-export http_proxy=http://127.0.0.1:1155
-export https_proxy=http://127.0.0.1:1155
-export NODE_EXTRA_CA_CERTS=~/.fakekey/certs/ca.crt
-```
-Then launch your Agent such as `claude`, `openclaw`, `pi`
+- **On stop**: `fakekey stop` automatically cleans up these environment variables
+
+- **Usage**: Simply replace real API keys with generated fake keys in your Agent or application
+
+> 💡 **Tip**: After environment variables are configured, you'll be prompted to run `source ~/.zshrc` (or your config file) to apply changes immediately.
 
 ## Security
 
