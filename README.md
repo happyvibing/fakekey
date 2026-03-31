@@ -149,8 +149,8 @@ Then launch your Agent such as `claude`, `openclaw`, `pi`
 
 ## Security
 
-1. **Key Protection** - Real keys are stored locally only, configuration files are automatically encrypted with CA private key (JSON format)
-2. **Certificate Security** - Locally generated CA certificates, private key file permissions 0600, also used for configuration encryption
+1. **Key Protection** - Real API keys are encrypted with AES-256-GCM and stored locally in config files; the encryption key is securely stored in OS-level key storage (macOS Keychain / Linux Secret Service / Windows Credential Manager)
+2. **Certificate Security** - Locally generated CA certificates with private key file permissions 0600, used for TLS MITM proxy
 3. **Network Security** - Only listens on local 127.0.0.1, supports host whitelist
 4. **Log Desensitization** - Automatically hides sensitive information
 5. **Audit Trail** - All key operations are logged to audit logs

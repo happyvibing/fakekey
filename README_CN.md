@@ -150,8 +150,8 @@ export NODE_EXTRA_CA_CERTS=~/.fakekey/certs/ca.crt
 
 ## 安全
 
-1. **密钥保护** - 真实密钥仅存储在本地，配置文件使用 CA 私钥自动加密（JSON 格式）
-2. **证书安全** - 本地生成 CA 证书，私钥文件权限 0600，同时用于配置加密
+1. **密钥保护** - 真实 API 密钥使用 AES-256-GCM 加密后存储在本地配置文件中；加密密钥安全存储于操作系统级密钥库（macOS Keychain / Linux Secret Service / Windows Credential Manager）
+2. **证书安全** - 本地生成 CA 证书，私钥文件权限 0600，用于 TLS MITM 代理
 3. **网络安全** - 仅监听本地 127.0.0.1，支持主机白名单
 4. **日志脱敏** - 自动隐藏敏感信息
 5. **审计追踪** - 所有关键操作记录到审计日志
