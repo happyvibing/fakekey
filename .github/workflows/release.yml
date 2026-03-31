@@ -129,11 +129,20 @@ jobs:
           git clone https://x-access-token:${{ secrets.TAP_GITHUB_TOKEN }}@github.com/happyvibing/homebrew-tap.git /tmp/homebrew-tap
           cd /tmp/homebrew-tap
 
+          # Replace version
           sed -i "s/version \".*\"/version \"${VERSION}\"/" Formula/fakekey.rb
-          sed -i "s/PLACEHOLDER_MACOS_ARM64_SHA256/${SHA256_MACOS_ARM64}/" Formula/fakekey.rb
-          sed -i "s/PLACEHOLDER_MACOS_AMD64_SHA256/${SHA256_MACOS_AMD64}/" Formula/fakekey.rb
-          sed -i "s/PLACEHOLDER_LINUX_ARM64_SHA256/${SHA256_LINUX_ARM64}/" Formula/fakekey.rb
-          sed -i "s/PLACEHOLDER_LINUX_AMD64_SHA256/${SHA256_LINUX_AMD64}/" Formula/fakekey.rb
+
+          # Replace sha256 by matching the url line, then replacing the next sha256 line
+          replace_sha() {
+            local pattern=$1
+            local new_sha=$2
+            sed -i "/${pattern}/{n;s/sha256 \"[a-f0-9]\+\"/sha256 \"${new_sha}\"/}" Formula/fakekey.rb
+          }
+
+          replace_sha "fakekey-macos-arm64" "${SHA256_MACOS_ARM64}"
+          replace_sha "fakekey-macos-amd64" "${SHA256_MACOS_AMD64}"
+          replace_sha "fakekey-linux-arm64" "${SHA256_LINUX_ARM64}"
+          replace_sha "fakekey-linux-amd64" "${SHA256_LINUX_AMD64}"
 
           git config user.email "github-actions@github.com"
           git config user.name "GitHub Actions"
