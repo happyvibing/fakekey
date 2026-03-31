@@ -102,13 +102,10 @@ fakekey remove --name my-openai-key
 # 查看代理状态
 fakekey status
 
-# 前台运行
+# 运行（默认后台运行）
 fakekey start
 
-# 后台运行（daemon 模式）
-fakekey start --daemon
-
-# 停止代理
+# 停止
 fakekey stop
 
 # 查看日志

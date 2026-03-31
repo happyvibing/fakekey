@@ -20,9 +20,9 @@ pub enum Commands {
         #[arg(short, long, default_value_t = 1155)]
         port: u16,
 
-        /// Run as daemon in background
+        /// Run in foreground (default is background)
         #[arg(short, long)]
-        daemon: bool,
+        foreground: bool,
     },
 
     /// Add an API key

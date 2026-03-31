@@ -138,8 +138,11 @@ struct ProxyConfig {
 # 初始化配置（生成 CA 证书）
 fakekey init
 
-# 启动代理服务
-fakekey start --port 1155 --daemon
+# 启动代理服务（默认后台模式）
+fakekey start --port 1155
+
+# 启动代理服务（前台模式）
+fakekey start --port 1155 --foreground
 
 # 添加 API 密钥
 fakekey add --service openai --key "sk-proj-xxxxx"
@@ -308,8 +311,8 @@ fakekey init
 fakekey add --service openai --key "sk-proj-real-key-123456789"
 # 输出: Generated fake key: sk-proj-real-key-123456_fk
 
-# 2. 启动代理
-fakekey start --daemon
+# 2. 启动代理（默认后台模式）
+fakekey start
 
 # 3. 在 IDE/应用中配置
 # - API Key: sk-proj-real-key-123456_fk

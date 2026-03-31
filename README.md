@@ -98,16 +98,13 @@ fakekey show --name my-openai-key
 # Delete key configuration
 fakekey remove --name my-openai-key
 
-# View proxy status
+# View status
 fakekey status
 
-# Run in foreground
+# Run (default background)
 fakekey start
 
-# Run in background (daemon mode)
-fakekey start --daemon
-
-# Stop proxy
+# Stop
 fakekey stop
 
 # View logs
