@@ -9,6 +9,12 @@ pub struct ToolConfig {
     pub requires_shell: bool,
 }
 
+/// A dynamic tool configuration for arbitrary commands
+pub struct DynamicTool {
+    pub name: String,
+    pub command: String,
+}
+
 static CLAUDE_TOOL: ToolConfig = ToolConfig {
     name: "claude",
     command: "claude",
@@ -31,6 +37,7 @@ pub fn get_tool(name: &str) -> Option<&'static ToolConfig> {
     }
 }
 
+#[allow(dead_code)]
 pub fn list_tools() -> Vec<&'static ToolConfig> {
     vec![
         &CLAUDE_TOOL,
@@ -38,8 +45,31 @@ pub fn list_tools() -> Vec<&'static ToolConfig> {
     ]
 }
 
+/// Launch a predefined tool with proxy configured
 pub fn launch_tool(
     tool: &ToolConfig,
+    args: &[String],
+    proxy_port: u16,
+    ca_cert_path: &std::path::Path,
+) -> Result<()> {
+    launch_tool_impl(tool.name, tool.command, tool.requires_shell, args, proxy_port, ca_cert_path)
+}
+
+/// Launch an arbitrary command with proxy configured
+pub fn launch_dynamic_tool(
+    tool: &DynamicTool,
+    args: &[String],
+    proxy_port: u16,
+    ca_cert_path: &std::path::Path,
+) -> Result<()> {
+    launch_tool_impl(&tool.name, &tool.command, false, args, proxy_port, ca_cert_path)
+}
+
+/// Internal implementation for launching any tool/command
+fn launch_tool_impl(
+    name: &str,
+    command: &str,
+    requires_shell: bool,
     args: &[String],
     proxy_port: u16,
     ca_cert_path: &std::path::Path,
@@ -60,7 +90,7 @@ pub fn launch_tool(
     env_vars.insert("REQUESTS_CA_BUNDLE", ca_path_str.to_string());
     
     // Prepare command
-    let mut cmd = if tool.requires_shell {
+    let mut cmd = if requires_shell {
         let mut shell_cmd = if cfg!(target_os = "windows") {
             let mut c = Command::new("cmd");
             c.arg("/C");
@@ -72,14 +102,14 @@ pub fn launch_tool(
         };
         
         let full_command = if args.is_empty() {
-            tool.command.to_string()
+            command.to_string()
         } else {
-            format!("{} {}", tool.command, args.join(" "))
+            format!("{} {}", command, args.join(" "))
         };
         shell_cmd.arg(full_command);
         shell_cmd
     } else {
-        let mut c = Command::new(tool.command);
+        let mut c = Command::new(command);
         c.args(args);
         c
     };
@@ -94,18 +124,18 @@ pub fn launch_tool(
        .stdout(Stdio::inherit())
        .stderr(Stdio::inherit());
     
-    println!("🚀 Launching {} with fakekey proxy...", tool.name);
+    println!("🚀 Launching {} with fakekey proxy...", name);
     println!("   Proxy: http://127.0.0.1:{}", proxy_port);
     println!("   CA cert: {}", ca_cert_path.display());
     println!();
     
     // Execute and wait for completion
     let status = cmd.status()
-        .with_context(|| format!("Failed to launch {}", tool.name))?;
+        .with_context(|| format!("Failed to launch {}", name))?;
     
     if !status.success() {
         let code = status.code().unwrap_or(-1);
-        anyhow::bail!("{} exited with code {}", tool.name, code);
+        anyhow::bail!("{} exited with code {}", name, code);
     }
     
     Ok(())
