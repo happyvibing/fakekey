@@ -47,7 +47,7 @@ hex = "0.4.3"
 security-framework = "2.11"
 
 [target.'cfg(target_os = "linux")'.dependencies]
-secret-service = "4.0"
+secret-service = "5"
 
 [target.'cfg(target_os = "windows")'.dependencies]
 windows = { version = "0.58", features = ["Win32_Foundation", "Win32_Security_Credentials"] }
