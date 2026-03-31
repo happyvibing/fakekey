@@ -8,10 +8,10 @@ pub fn daemonize(pid_file: &PathBuf) -> Result<()> {
     let current_exe = std::env::current_exe()
         .with_context(|| "Failed to get current executable path")?;
     
-    // Reconstruct args without --daemon flag
+    // Reconstruct args without --foreground flag
     let args: Vec<String> = std::env::args()
         .skip(1)
-        .filter(|arg| arg != "--daemon" && arg != "-d")
+        .filter(|arg| arg != "--foreground" && arg != "-f")
         .collect();
     
     let child = Command::new(&current_exe)

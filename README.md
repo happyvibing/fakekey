@@ -26,12 +26,6 @@ FakeKey is a high-performance API key proxy program developed in Rust. Through i
 curl -fsSL https://raw.githubusercontent.com/happyvibing/fakekey/main/install.sh | bash
 ```
 
-#### Homebrew (macOS / Linux)
-
-```bash
-brew install happyvibing/tap/fakekey
-```
-
 #### Cargo (from crates.io)
 
 ```bash
@@ -98,16 +92,13 @@ fakekey show --name my-openai-key
 # Delete key configuration
 fakekey remove --name my-openai-key
 
-# View proxy status
+# View status
 fakekey status
 
-# Run in foreground
+# Run (default background)
 fakekey start
 
-# Run in background (daemon mode)
-fakekey start --daemon
-
-# Stop proxy
+# Stop
 fakekey stop
 
 # View logs

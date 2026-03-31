@@ -38,7 +38,7 @@ async fn main() -> Result<()> {
 
     match cli.command {
         Commands::Init => cmd_init()?,
-        Commands::Start { port, daemon } => cmd_start(port, daemon).await?,
+        Commands::Start { port, foreground } => cmd_start(port, foreground).await?,
         Commands::Add {
             name,
             key,
@@ -108,13 +108,14 @@ fn cmd_init() -> Result<()> {
 }
 
 /// Start the proxy server
-async fn cmd_start(port: u16, daemon_mode: bool) -> Result<()> {
+async fn cmd_start(port: u16, foreground_mode: bool) -> Result<()> {
     let mut config = AppConfig::load()?;
     config.proxy.port = port;
     let data_dir = config.data_dir();
     let pid_file = data_dir.join("pid");
 
-    if daemon_mode && !daemon::is_daemon_mode() {
+    // Start in background mode by default unless foreground is specified
+    if !foreground_mode && !daemon::is_daemon_mode() {
         daemon::daemonize(&pid_file)?;
     }
 
@@ -911,7 +912,6 @@ async fn cmd_onboard() -> Result<()> {
             
             let mut child = std::process::Command::new(current_exe)
                 .arg("start")
-                .arg("--daemon")
                 .arg("--port")
                 .arg(config.proxy.port.to_string())
                 .stdin(Stdio::null())
@@ -948,7 +948,6 @@ async fn cmd_onboard() -> Result<()> {
             
             let mut child = std::process::Command::new(current_exe)
                 .arg("start")
-                .arg("--daemon")
                 .arg("--port")
                 .arg(config.proxy.port.to_string())
                 .stdin(Stdio::null())
@@ -964,8 +963,8 @@ async fn cmd_onboard() -> Result<()> {
             std::thread::sleep(std::time::Duration::from_millis(500));
         } else {
             println!("💡 You can start the proxy later with:");
-            println!("   fakekey start --daemon");
-            println!("   fakekey start  # foreground mode");
+            println!("   fakekey start  # background mode");
+            println!("   fakekey start --foreground  # foreground mode");
         }
     }
 
@@ -1032,7 +1031,6 @@ async fn cmd_run(tool_name: &str, args: &[String]) -> Result<()> {
         
         let mut child = Command::new(current_exe)
             .arg("start")
-            .arg("--daemon")
             .arg("--port")
             .arg(config.proxy.port.to_string())
             .stdin(Stdio::null())
@@ -1058,7 +1056,7 @@ async fn cmd_run(tool_name: &str, args: &[String]) -> Result<()> {
         }
         
         if !proxy_running {
-            anyhow::bail!("Failed to start proxy. Try running `fakekey start --daemon` manually.");
+            anyhow::bail!("Failed to start proxy. Try running `fakekey start` manually.");
         }
     }
     
