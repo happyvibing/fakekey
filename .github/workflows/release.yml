@@ -118,6 +118,29 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Update Homebrew tap
+        run: |
+          VERSION=${GITHUB_REF_NAME#v}
+          SHA256_MACOS_ARM64=$(grep 'fakekey-macos-arm64.tar.gz' artifacts/checksums-sha256.txt | awk '{print $1}')
+          SHA256_MACOS_AMD64=$(grep 'fakekey-macos-amd64.tar.gz' artifacts/checksums-sha256.txt | awk '{print $1}')
+          SHA256_LINUX_ARM64=$(grep 'fakekey-linux-arm64.tar.gz' artifacts/checksums-sha256.txt | awk '{print $1}')
+          SHA256_LINUX_AMD64=$(grep 'fakekey-linux-amd64.tar.gz' artifacts/checksums-sha256.txt | awk '{print $1}')
+
+          git clone https://x-access-token:${{ secrets.TAP_GITHUB_TOKEN }}@github.com/happyvibing/homebrew-tap.git /tmp/homebrew-tap
+          cd /tmp/homebrew-tap
+
+          sed -i "s/version \".*\"/version \"${VERSION}\"/" Formula/fakekey.rb
+          sed -i "s/PLACEHOLDER_MACOS_ARM64_SHA256/${SHA256_MACOS_ARM64}/" Formula/fakekey.rb
+          sed -i "s/PLACEHOLDER_MACOS_AMD64_SHA256/${SHA256_MACOS_AMD64}/" Formula/fakekey.rb
+          sed -i "s/PLACEHOLDER_LINUX_ARM64_SHA256/${SHA256_LINUX_ARM64}/" Formula/fakekey.rb
+          sed -i "s/PLACEHOLDER_LINUX_AMD64_SHA256/${SHA256_LINUX_AMD64}/" Formula/fakekey.rb
+
+          git config user.email "github-actions@github.com"
+          git config user.name "GitHub Actions"
+          git add Formula/fakekey.rb
+          git diff --staged --quiet || git commit -m "Update fakekey to v${VERSION}"
+          git push
+
   publish:
     name: Publish to crates.io
     needs: test
@@ -125,4 +148,5 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - run: cargo publish --token ${{ secrets.CRATES_IO_TOKEN }}
+      - name: Publish (skip if version already exists)
+        run: cargo publish --token ${{ secrets.CRATES_IO_TOKEN }} || echo "Version already published, skipping"

@@ -150,7 +150,7 @@ mod platform {
     use windows::core::PWSTR;
     use windows::Win32::Foundation::ERROR_NOT_FOUND;
     use windows::Win32::Security::Credentials::{
-        CredDeleteW, CredReadW, CredWriteW, CREDENTIALW, CRED_TYPE_GENERIC,
+        CredDeleteW, CredReadW, CredWriteW, CREDENTIALW, CRED_FLAGS, CRED_TYPE_GENERIC,
     };
 
     fn target_name() -> Vec<u16> {
@@ -206,7 +206,7 @@ mod platform {
                     .collect();
                 
                 let credential = CREDENTIALW {
-                    Flags: 0,
+                    Flags: CRED_FLAGS(0),
                     Type: CRED_TYPE_GENERIC,
                     TargetName: PWSTR(target.as_ptr() as *mut u16),
                     Comment: PWSTR(comment.as_mut_ptr()),
