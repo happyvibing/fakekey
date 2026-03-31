@@ -106,10 +106,10 @@ fakekey remove --name my-openai-key
 # 查看代理状态
 fakekey status
 
-# 运行（默认后台运行）
+# 启动代理（自动配置环境变量）
 fakekey start
 
-# 停止
+# 停止代理（自动清理环境变量）
 fakekey stop
 
 # 查看日志
@@ -137,20 +137,22 @@ fakekey run claude --help
 3. 启动工具并启用代理保护
 4. 您的所有 API 密钥都将自动受到保护！
 
-### 手动代理配置
+### 自动代理配置
 
-如果您更喜欢手动配置：
+FakeKey 会自动管理你的 shell 环境变量，无需手动配置：
 
-- 将生成的假 API KEY 代替真的应用到 Agent 或应用中
-- 在 Agent 或应用中设置网络代理为 `http://127.0.0.1:1155`
+- **启动时**：`fakekey start` 会自动将以下环境变量添加到你的 shell 配置文件（`.zshrc`、`.bashrc` 等）：
+  - `http_proxy=http://127.0.0.1:1155`
+  - `https_proxy=http://127.0.0.1:1155`
+  - `NODE_EXTRA_CA_CERTS=~/.fakekey/certs/ca.crt`
+  - `SSL_CERT_FILE=~/.fakekey/certs/ca.crt`
+  - `REQUESTS_CA_BUNDLE=~/.fakekey/certs/ca.crt`
 
-例如先设置网络代理:
-```bash
-export http_proxy=http://127.0.0.1:1155
-export https_proxy=http://127.0.0.1:1155
-export NODE_EXTRA_CA_CERTS=~/.fakekey/certs/ca.crt
-```
-然后再启动 Agent 如 `claude`、`openclaw`、`pi`
+- **停止时**：`fakekey stop` 会自动清理这些环境变量
+
+- **使用方式**：只需将生成的假 API KEY 替换真实密钥到你的 Agent 或应用中即可
+
+> 💡 **提示**：环境变量配置后会提示你运行 `source ~/.zshrc`（或对应配置文件）来立即生效。
 
 ## 安全
 
